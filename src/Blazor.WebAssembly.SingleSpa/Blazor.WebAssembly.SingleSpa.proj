@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.Build.NoTargets/3.3.0">
+<Project Sdk="Microsoft.Build.NoTargets/3.7.0">
   <PropertyGroup>
     <TargetFrameworks>net6.0;net7.0</TargetFrameworks>
   </PropertyGroup>
