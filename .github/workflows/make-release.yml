@@ -1,0 +1,16 @@
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version
+        required: true
+        type: string
+
+name: Make Release
+run-name: Releasing v${{ inputs.version }}
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+    - run: echo test
