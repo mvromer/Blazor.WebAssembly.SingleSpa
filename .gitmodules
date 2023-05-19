@@ -1,0 +1,6 @@
+[submodule "aspnetcore/7.x"]
+	path = src/aspnetcore/7.x
+	url = https://github.com/dotnet/aspnetcore.git
+[submodule "aspnetcore/6.x"]
+	path = src/aspnetcore/6.x
+	url = https://github.com/dotnet/aspnetcore.git
