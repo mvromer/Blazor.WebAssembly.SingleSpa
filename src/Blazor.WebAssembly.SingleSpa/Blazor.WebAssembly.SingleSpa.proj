@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.Build.NoTargets/3.3.0">
+  <PropertyGroup>
+    <TargetFrameworks>net6.0;net7.0</TargetFrameworks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="build\**\*" Pack="true" PackagePath="build" />
+    <!-- For now create the lib/net* output directory. Otherwise the NuGet Pack task will throw
+    warnings saying the package will be treated as compatiable for all frameworks when really we
+    want it to be compatible with only the framework versions we explicitly support. -->
+    <Content Include="lib\**\*" Pack="true" PackagePath="lib" />
+  </ItemGroup>
+</Project>
