@@ -5,9 +5,9 @@ targeting single-spa
 
 ## Applicable Versions
 
-The Blazor.WebAssembly.SingleSpa NuGet package contains support for projects targeting both .NET 6
-and .NET 7. Specifically, the assets for each target framework version were built from the following
-specific versions of ASP.NET Core:
+The Blazor.WebAssembly.SingleSpa NuGet package contains (lightly-tested) support for projects
+targeting both .NET 6 and .NET 7. Specifically, the assets for each target framework version were
+built from the following specific versions of ASP.NET Core:
 
 Target Framework Version | ASP.NET Core Version
 -------------------------|---------------------
@@ -19,7 +19,21 @@ However, no guarantees are given.
 
 ## Usage
 
-Install from nuget.
+In general, installing this package in your Blazor WebAssembly project is sufficient for getting the
+modified Blazor startup script:
+
+```powershell
+dotnet add package Blazor.WebAssembly.SingleSpa
+```
+
+However, to fully integrate a Blazor-based micro frontend, you will need to, at the very least,
+supply implementations for the three core single-spa lifecycle callbacks
+([bootstrap](https://single-spa.js.org/docs/building-applications#bootstrap),
+[mount](https://single-spa.js.org/docs/building-applications#mount), and
+[unmount](https://single-spa.js.org/docs/building-applications#unmount)). How you do this is up to
+you and your project's needs. As part of this proof of concept, I have put together a simple web
+app built on single-spa that incorporates both [Lit-based](https://lit.dev/) and Blazor-based
+micro frontends. See here: [blazing-lit-mfe-demo](https://github.com/mvromer/blazing-lit-mfe-demo)
 
 ## Building from source
 
@@ -32,7 +46,7 @@ Within this project's `patches` directory are a corresponding set of patches and
 each version of ASP.NET Core that has been tested. The `Build-PatchedBlazorWasm.ps1` script in each
 versioned directory will apply the patch located alongside it to the corresponding version of the
 ASP.NET Core repository and build the necessary components to produce a patched Blazor WASM startup
-(i.e., `blazor.webassembly.js` for .NET 6 and .NET 7; this seems to be changing in .NET 8).
+script (i.e., `blazor.webassembly.js` for .NET 6 and .NET 7; this seems to be changing in .NET 8).
 
 The final Blazor WASM startup script is then copied to the appropriate location within the
 `src/Blazor.WebAssembly.SingleSpa` project so that when the final NuGet is built the startup script

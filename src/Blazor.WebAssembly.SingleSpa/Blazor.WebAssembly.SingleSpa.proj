@@ -1,9 +1,17 @@
 <Project Sdk="Microsoft.Build.NoTargets/3.7.0">
   <PropertyGroup>
     <TargetFrameworks>net6.0;net7.0</TargetFrameworks>
+    <Authors>mvromer</Authors>
+    <Description>Proof of concept around enabling the integration of Blazor WASM applications as micro frontends targeting single-spa</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <RepositoryUrl>https://github.com/mvromer/Blazor.WebAssembly.SingleSpa.git</RepositoryUrl>
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+
     <Content Include="build\**\*" Pack="true" PackagePath="build" />
     <!-- For now create the lib/net* output directory. Otherwise the NuGet Pack task will throw
     warnings saying the package will be treated as compatiable for all frameworks when really we
