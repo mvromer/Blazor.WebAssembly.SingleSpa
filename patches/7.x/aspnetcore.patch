@@ -245,13 +245,14 @@ index 4f14e8fe39..6639217a32 100644
      return new BootConfigResult(bootConfig, applicationEnvironment);
  
 -    function defaultLoadBlazorBootJson(url: string) : Promise<Response> {
+-      return fetch(url, {
 +    function defaultLoadBlazorBootJson(
 +      url: string,
 +      resourceBaseUri: string,
 +      resourceFetchCredentialMode?: RequestCredentials
 +    ) : Promise<Response> {
 +      const resourceUrl = new URL(url, resourceBaseUri).href;
-       return fetch(url, {
++      return fetch(resourceUrl, {
          method: 'GET',
 -        credentials: 'include',
 +        credentials: resourceFetchCredentialMode ?? 'include',
