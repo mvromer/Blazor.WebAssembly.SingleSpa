@@ -202,7 +202,7 @@ index 4cc1b035ee..444544696a 100644
        return path;
      }
 diff --git a/src/Components/Web.JS/src/Platform/BootConfig.ts b/src/Components/Web.JS/src/Platform/BootConfig.ts
-index 4f14e8fe39..6639217a32 100644
+index 4f14e8fe39..26fada33f4 100644
 --- a/src/Components/Web.JS/src/Platform/BootConfig.ts
 +++ b/src/Components/Web.JS/src/Platform/BootConfig.ts
 @@ -9,17 +9,30 @@ export class BootConfigResult {
@@ -581,19 +581,24 @@ index c3321da6d9..11b2150dc7 100644
  
    return href.startsWith(baseUriWithoutTrailingSlash)
 diff --git a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
-index 46676d0d6f..fb3bf2adea 100644
+index 46676d0d6f..841d016d49 100644
 --- a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
 +++ b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
-@@ -71,7 +71,7 @@ export module DotNet {
+@@ -71,9 +71,11 @@ export module DotNet {
        // However since we're the one calling the import keyword, they would be resolved relative to
        // this framework bundle URL. Fix this by providing an absolute URL.
        if (typeof url === "string" && url.startsWith("./")) {
 -          url = document.baseURI + url.substr(2);
 +          url = importBaseUri + url.substr(2);
++      }
++      if (typeof url === "string" && url.startsWith("/")) {
++          url = importBaseUri + url.substr(1);
        }
- 
+-
        return import(/* webpackIgnore: true */ url);
-@@ -608,4 +608,9 @@ export module DotNet {
+   });
+ 
+@@ -608,4 +610,9 @@ export module DotNet {
  
        return value;
    }
