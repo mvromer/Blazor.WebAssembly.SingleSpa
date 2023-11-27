@@ -1,5 +1,11 @@
+diff --git a/src/Components/Web.JS/dist/Release/blazor.server.js b/src/Components/Web.JS/dist/Release/blazor.server.js
+index a055e7113f..14cdbc4554 100644
+Binary files a/src/Components/Web.JS/dist/Release/blazor.server.js and b/src/Components/Web.JS/dist/Release/blazor.server.js differ
+diff --git a/src/Components/Web.JS/dist/Release/blazor.webview.js b/src/Components/Web.JS/dist/Release/blazor.webview.js
+index 742572b656..59ce6dc20e 100644
+Binary files a/src/Components/Web.JS/dist/Release/blazor.webview.js and b/src/Components/Web.JS/dist/Release/blazor.webview.js differ
 diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.ts b/src/Components/Web.JS/src/Boot.WebAssembly.ts
-index e46702cc4d..28b8ca6782 100644
+index e46702cc4d..75867d84ab 100644
 --- a/src/Components/Web.JS/src/Boot.WebAssembly.ts
 +++ b/src/Components/Web.JS/src/Boot.WebAssembly.ts
 @@ -17,6 +17,7 @@ import { WebAssemblyStartOptions } from './Platform/WebAssemblyStartOptions';
@@ -10,19 +16,20 @@ index e46702cc4d..28b8ca6782 100644
  import { fetchAndInvokeInitializers } from './JSInitializers/JSInitializers.WebAssembly';
  
  let started = false;
-@@ -33,6 +34,11 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
+@@ -33,6 +34,12 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
      await new Promise(() => {}); // See inAuthRedirectIframe for explanation
    }
  
 +  const resourceBaseUri = options?.resourceBaseUri ?? document.baseURI;
 +  const resourceFetchCredentialMode = options?.resourceFetchCredentialMode;
 +  const appBaseUri = options?.appBaseUri ?? document.baseURI;
++  const mainArgs = options?.mainArgs ?? [];
 +  DotNet.setImportBaseUri(resourceBaseUri);
 +
    setDispatchEventMiddleware((browserRendererId, eventHandlerId, continuation) => {
      // It's extremely unusual, but an event can be raised while we're in the middle of synchronously applying a
      // renderbatch. For example, a renderbatch might mutate the DOM in such a way as to cause an <input> to lose
-@@ -74,30 +80,37 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
+@@ -74,30 +81,37 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
    };
  
    // Configure navigation via JS Interop
@@ -79,7 +86,7 @@ index e46702cc4d..28b8ca6782 100644
  
    const candidateOptions = options ?? {};
  
-@@ -105,7 +118,12 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
+@@ -105,7 +119,12 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
    const environment = candidateOptions.environment;
  
    // Fetch the resources and prepare the Mono runtime
@@ -93,7 +100,7 @@ index e46702cc4d..28b8ca6782 100644
  
    // Leverage the time while we are loading boot.config.json from the network to discover any potentially registered component on
    // the document.
-@@ -132,11 +150,16 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
+@@ -132,11 +151,16 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
    };
  
    const bootConfigResult: BootConfigResult = await bootConfigPromise;
@@ -113,6 +120,15 @@ index e46702cc4d..28b8ca6782 100644
    ]);
  
    try {
+@@ -146,7 +170,7 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
+   }
+ 
+   // Start up the application
+-  platform.callEntryPoint(resourceLoader.bootConfig.entryAssembly);
++  platform.callEntryPoint(resourceLoader.bootConfig.entryAssembly, mainArgs);
+   // At this point .NET has been initialized (and has yielded), we can't await the promise becasue it will
+   // only end when the app finishes running
+   jsInitializer.invokeAfterStartedCallbacks(Blazor);
 diff --git a/src/Components/Web.JS/src/GlobalExports.ts b/src/Components/Web.JS/src/GlobalExports.ts
 index 4fca849b69..64734c36ca 100644
 --- a/src/Components/Web.JS/src/GlobalExports.ts
@@ -289,9 +305,24 @@ index c5682e8063..a0752b05f4 100644
    link.rel = 'noopener noreferrer';
    link.click();
 diff --git a/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts b/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
-index 03c2a5d90f..14d08a87c0 100644
+index 03c2a5d90f..567c21a981 100644
 --- a/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
 +++ b/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
+@@ -57,11 +57,11 @@ export const monoPlatform: Platform = {
+     await createEmscriptenModuleInstance(resourceLoader);
+   },
+ 
+-  callEntryPoint: async function callEntryPoint(assemblyName: string): Promise<any> {
+-    const emptyArray = [[]];
++  callEntryPoint: async function callEntryPoint(assemblyName: string, mainArgs: string[]): Promise<any> {
++    const argsArray = [mainArgs];
+ 
+     try {
+-      await BINDING.call_assembly_entry_point(assemblyName, emptyArray, 'm');
++      await BINDING.call_assembly_entry_point(assemblyName, argsArray, 'm');
+     } catch (error) {
+       console.error(error);
+       showErrorNotification();
 @@ -175,25 +175,40 @@ async function importDotnetJs(resourceLoader: WebAssemblyResourceLoader): Promis
      .keys(resourceLoader.bootConfig.resources.runtime)
      .filter(n => n.startsWith('dotnet.') && n.endsWith('.js'))[0];
@@ -389,6 +420,28 @@ index 03c2a5d90f..14d08a87c0 100644
    return anchorTagForAbsoluteUrlConversions.href;
  }
  
+@@ -672,7 +687,7 @@ async function compileWasmModule(wasmResource: LoadingResource, imports: any): P
+     // Fall back on ArrayBuffer instantiation.
+     const arrayBuffer = await wasmResourceResponse.arrayBuffer();
+     const arrayBufferResult = await WebAssembly.instantiate(arrayBuffer, imports);
+-    return arrayBufferResult.instance;  
++    return arrayBufferResult.instance;
+   }
+ }
+ 
+diff --git a/src/Components/Web.JS/src/Platform/Platform.ts b/src/Components/Web.JS/src/Platform/Platform.ts
+index 685fda4559..c775902584 100644
+--- a/src/Components/Web.JS/src/Platform/Platform.ts
++++ b/src/Components/Web.JS/src/Platform/Platform.ts
+@@ -7,7 +7,7 @@ import { WebAssemblyResourceLoader } from './WebAssemblyResourceLoader';
+ export interface Platform {
+   start(resourceLoader: WebAssemblyResourceLoader): Promise<void>;
+ 
+-  callEntryPoint(assemblyName: string): Promise<unknown>;
++  callEntryPoint(assemblyName: string, mainArgs: string[]): Promise<unknown>;
+ 
+   toUint8Array(array: System_Array<unknown>): Uint8Array;
+ 
 diff --git a/src/Components/Web.JS/src/Platform/WebAssemblyConfigLoader.ts b/src/Components/Web.JS/src/Platform/WebAssemblyConfigLoader.ts
 index 38b9ba3ebc..0315e48d52 100644
 --- a/src/Components/Web.JS/src/Platform/WebAssemblyConfigLoader.ts
@@ -483,10 +536,10 @@ index f286d79517..fa57282d75 100644
    try {
      // There's a Chromium bug we need to be aware of here: the CacheStorage APIs say that when
 diff --git a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts b/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
-index 4c40a349f4..1ae6518777 100644
+index 4c40a349f4..37eb9e8267 100644
 --- a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
 +++ b/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
-@@ -22,6 +22,33 @@ export interface WebAssemblyStartOptions {
+@@ -22,6 +22,39 @@ export interface WebAssemblyStartOptions {
     * Gets the application culture. This is a name specified in the BCP 47 format. See https://tools.ietf.org/html/bcp47
     */
    applicationCulture?: string;
@@ -517,6 +570,12 @@ index 4c40a349f4..1ae6518777 100644
 +   * Blazor's defaults will be used instead.
 +   */
 +  resourceFetchCredentialMode?: RequestCredentials;
++
++  /**
++   * A list or arguments to pass to the main method of the Blazor application. If not provided,
++   * defaults to an empty list.
++   */
++  mainArgs?: string[];
  }
  
  // This type doesn't have to align with anything in BootConfig.
@@ -580,6 +639,19 @@ index c3321da6d9..11b2150dc7 100644
    const nextChar = href.charAt(baseUriWithoutTrailingSlash.length);
  
    return href.startsWith(baseUriWithoutTrailingSlash)
+diff --git a/src/Components/Web.JS/src/webpack.config.js b/src/Components/Web.JS/src/webpack.config.js
+index fe5cf84212..c2b3cd47ba 100644
+--- a/src/Components/Web.JS/src/webpack.config.js
++++ b/src/Components/Web.JS/src/webpack.config.js
+@@ -29,7 +29,7 @@ module.exports = (env, args) => ({
+         providedExports: true,
+         usedExports: true,
+         innerGraph: true,
+-        minimize: true,
++        minimize: false,
+         minimizer: [new TerserJsPlugin({
+             terserOptions: {
+                 ecma: 2019,
 diff --git a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
 index 46676d0d6f..841d016d49 100644
 --- a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
