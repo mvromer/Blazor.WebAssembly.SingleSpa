@@ -1,9 +1,3 @@
-diff --git a/src/Components/Web.JS/dist/Release/blazor.server.js b/src/Components/Web.JS/dist/Release/blazor.server.js
-index a055e7113f..14cdbc4554 100644
-Binary files a/src/Components/Web.JS/dist/Release/blazor.server.js and b/src/Components/Web.JS/dist/Release/blazor.server.js differ
-diff --git a/src/Components/Web.JS/dist/Release/blazor.webview.js b/src/Components/Web.JS/dist/Release/blazor.webview.js
-index 742572b656..59ce6dc20e 100644
-Binary files a/src/Components/Web.JS/dist/Release/blazor.webview.js and b/src/Components/Web.JS/dist/Release/blazor.webview.js differ
 diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.ts b/src/Components/Web.JS/src/Boot.WebAssembly.ts
 index e46702cc4d..75867d84ab 100644
 --- a/src/Components/Web.JS/src/Boot.WebAssembly.ts
@@ -639,19 +633,6 @@ index c3321da6d9..11b2150dc7 100644
    const nextChar = href.charAt(baseUriWithoutTrailingSlash.length);
  
    return href.startsWith(baseUriWithoutTrailingSlash)
-diff --git a/src/Components/Web.JS/src/webpack.config.js b/src/Components/Web.JS/src/webpack.config.js
-index fe5cf84212..c2b3cd47ba 100644
---- a/src/Components/Web.JS/src/webpack.config.js
-+++ b/src/Components/Web.JS/src/webpack.config.js
-@@ -29,7 +29,7 @@ module.exports = (env, args) => ({
-         providedExports: true,
-         usedExports: true,
-         innerGraph: true,
--        minimize: true,
-+        minimize: false,
-         minimizer: [new TerserJsPlugin({
-             terserOptions: {
-                 ecma: 2019,
 diff --git a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
 index 46676d0d6f..841d016d49 100644
 --- a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
