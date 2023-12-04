@@ -5,14 +5,13 @@ targeting single-spa
 
 ## Applicable Versions
 
-The Blazor.WebAssembly.SingleSpa NuGet package contains (lightly-tested) support for projects
-targeting both .NET 6 and .NET 7. Specifically, the assets for each target framework version were
-built from the following specific versions of ASP.NET Core:
+The Blazor.WebAssembly.SingleSpa NuGet package contains experimental support for projects targeting
+.NET 7. Specifically, the assets for each target framework version were built from the following
+specific versions of ASP.NET Core:
 
 Target Framework Version | ASP.NET Core Version
 -------------------------|---------------------
-.NET 6                   | 6.0.16
-.NET 7                   | 7.0.5
+.NET 7                   | 7.0.11w
 
 For a given target framework version, this package _may_ work for previous minor/patch releases.
 However, no guarantees are given.
@@ -39,8 +38,8 @@ micro frontends. See here: [blazing-lit-mfe-demo](https://github.com/mvromer/bla
 
 This repository is structured around the following idea: for a given version of ASP.NET Core, a
 submodule is located at `src/aspnetcore/<version>`, Each submodule is configured to pull the
-corresponding version tag from the `dotnet/aspnetcore` repository, e.g., `src/aspnetcore/6.0.3`
-pulls the commit of `dotnet/aspnetcore` tagged with `v6.0.3`.
+corresponding version tag from the `dotnet/aspnetcore` repository, e.g., `src/aspnetcore/7.0.11`
+pulls the commit of `dotnet/aspnetcore` tagged with `v7.0.11`.
 
 Within this project's `patches` directory are a corresponding set of patches and scripts, one for
 each version of ASP.NET Core that has been tested. The `Build-PatchedBlazorWasm.ps1` script in each
