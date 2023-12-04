@@ -24,9 +24,6 @@ jobs:
         dotnet-version: 7
     - name: Install Yarn 1
       run: npm install -g yarn
-    - name: Patch ASP.NET Core 6.x
-      shell: pwsh
-      run: ./patches/6.x/Build-PatchedBlazorWasm.ps1
     - name: Patch ASP.NET Core 7.x
       shell: pwsh
       run: ./patches/7.x/Build-PatchedBlazorWasm.ps1
