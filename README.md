@@ -11,7 +11,7 @@ specific versions of ASP.NET Core:
 
 Target Framework Version | ASP.NET Core Version
 -------------------------|---------------------
-.NET 7                   | 7.0.11w
+.NET 7                   | 7.0.15
 
 For a given target framework version, this package _may_ work for previous minor/patch releases.
 However, no guarantees are given.
@@ -36,20 +36,21 @@ micro frontends. See here: [blazing-lit-mfe-demo](https://github.com/mvromer/bla
 
 ## Building from source
 
-This repository is structured around the following idea: for a given version of ASP.NET Core, a
-submodule is located at `src/aspnetcore/<version>`, Each submodule is configured to pull the
-corresponding version tag from the `dotnet/aspnetcore` repository, e.g., `src/aspnetcore/7.0.11`
-pulls the commit of `dotnet/aspnetcore` tagged with `v7.0.11`.
+This repository is structured around the following idea: for a given major version `N` of ASP.NET
+Core, a submodule named `aspnetcore/N.x` is located at `src/aspnetcore/N.x`, Each submodule is
+configured to pull a version tag from the `dotnet/aspnetcore` repository matching the specified
+major version number, e.g., `src/aspnetcore/7.x` pulls the commit of `dotnet/aspnetcore` tagged with
+`v7.0.15`.
 
 Within this project's `patches` directory are a corresponding set of patches and scripts, one for
-each version of ASP.NET Core that has been tested. The `Build-PatchedBlazorWasm.ps1` script in each
-versioned directory will apply the patch located alongside it to the corresponding version of the
-ASP.NET Core repository and build the necessary components to produce a patched Blazor WASM startup
-script (i.e., `blazor.webassembly.js` for .NET 6 and .NET 7; this seems to be changing in .NET 8).
+each major version of ASP.NET Core that has been tested. The `Build-PatchedBlazorWasm.ps1` script in
+each versioned directory will apply the patch located alongside it to the corresponding version of
+the ASP.NET Core repository and build the necessary components to produce a set of patched Blazor
+WebAssembly assets, such as the `blazor.webassembly.js` startup script.
 
-The final Blazor WASM startup script is then copied to the appropriate location within the
-`src/Blazor.WebAssembly.SingleSpa` project so that when the final NuGet is built the startup script
-is in the correct package location.
+The final Blazor assets are then copied to the appropriate location within the
+`src/Blazor.WebAssembly.SingleSpa` project so that when the final NuGet is built the assets are in
+the correct package location.
 
 ### Installing prerequisites
 
