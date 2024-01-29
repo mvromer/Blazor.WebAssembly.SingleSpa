@@ -1,0 +1,40 @@
+diff --git a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
+index 4a237e391c..66a5d26e29 100644
+--- a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
++++ b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
+@@ -72,7 +72,19 @@ export module DotNet {
+       // However since we're the one calling the import keyword, they would be resolved relative to
+       // this framework bundle URL. Fix this by providing an absolute URL.
+       if (typeof url === "string" && url.startsWith("./")) {
+-          url = new URL(url.substr(2), document.baseURI).toString();
++          // B.W.S: The given URL is a relative URL path. Blazor's intent in this case is to resolve
++          // it against the apps "base HREF". The original code used document.baseURI and also had
++          // the implicit assumption that the page's base HREF ended with a trailing slash. This
++          // would ensure the URL concatenation formed the correct full absolute URL. In our case,
++          // we concatenate with the importBaseUrl provided by B.W.S and that can be be optionally
++          // called by the developer when bootstrapping the app. Out of a desire to not deviate too
++          // much from the original code, we will assume that the importBaseUrl will always end with
++          // a trailing slash.
++          //
++          // NOTE: The original code stripped the leading "./" from the URL. We don't do that here
++          // because it's not necessary. The URL will be resolved correctly regardless of whether
++          // the leading "./" is present or not.
++          url = new URL(url, importBaseUrl).toString();
+       }
+ 
+       return import(/* webpackIgnore: true */ url);
+@@ -686,4 +698,14 @@ export module DotNet {
+ 
+       return value;
+   }
++
++  // B.W.S: The importBaseUrl will be used when converting relative and absolute path URLs to full
++  // absolute URLs (ones that include the scheme, host, port, and app base path etc.). These are
++  // then used when resolving dynamic imports in the import function registered for invocation from
++  // .NET code running in the browser. The original code used document.baseURI as the base URL when
++  // resolving dynamic imports, thus we choose to initialize the importBaseUrl to that value.
++  let importBaseUrl = document.baseURI;
++  export function setImportBaseUrl(url: string) {
++    importBaseUrl = url;
++  }
+ }
