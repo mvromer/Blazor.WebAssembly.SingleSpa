@@ -1,29 +1,54 @@
+diff --git a/src/Components/Web.JS/dist/Release/blazor.server.js b/src/Components/Web.JS/dist/Release/blazor.server.js
+index ba09c85d88..1d36271c78 100644
+Binary files a/src/Components/Web.JS/dist/Release/blazor.server.js and b/src/Components/Web.JS/dist/Release/blazor.server.js differ
+diff --git a/src/Components/Web.JS/dist/Release/blazor.web.js b/src/Components/Web.JS/dist/Release/blazor.web.js
+index d28bd9c18d..210bf1e51f 100644
+Binary files a/src/Components/Web.JS/dist/Release/blazor.web.js and b/src/Components/Web.JS/dist/Release/blazor.web.js differ
+diff --git a/src/Components/Web.JS/dist/Release/blazor.webview.js b/src/Components/Web.JS/dist/Release/blazor.webview.js
+index afc283f9f2..d9a6f2be16 100644
+Binary files a/src/Components/Web.JS/dist/Release/blazor.webview.js and b/src/Components/Web.JS/dist/Release/blazor.webview.js differ
 diff --git a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
-index 4a237e391c..66a5d26e29 100644
+index 4a237e391c..d1d2839ec9 100644
 --- a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
 +++ b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
-@@ -72,7 +72,19 @@ export module DotNet {
+@@ -71,8 +71,34 @@ export module DotNet {
+       // In most cases developers will want to resolve dynamic imports relative to the base HREF.
        // However since we're the one calling the import keyword, they would be resolved relative to
        // this framework bundle URL. Fix this by providing an absolute URL.
-       if (typeof url === "string" && url.startsWith("./")) {
+-      if (typeof url === "string" && url.startsWith("./")) {
 -          url = new URL(url.substr(2), document.baseURI).toString();
-+          // B.W.S: The given URL is a relative URL path. Blazor's intent in this case is to resolve
-+          // it against the apps "base HREF". The original code used document.baseURI and also had
-+          // the implicit assumption that the page's base HREF ended with a trailing slash. This
-+          // would ensure the URL concatenation formed the correct full absolute URL. In our case,
-+          // we concatenate with the importBaseUrl provided by B.W.S and that can be be optionally
-+          // called by the developer when bootstrapping the app. Out of a desire to not deviate too
-+          // much from the original code, we will assume that the importBaseUrl will always end with
-+          // a trailing slash.
-+          //
-+          // NOTE: The original code stripped the leading "./" from the URL. We don't do that here
-+          // because it's not necessary. The URL will be resolved correctly regardless of whether
-+          // the leading "./" is present or not.
-+          url = new URL(url, importBaseUrl).toString();
++      if (typeof url === "string") {
++          if (url.startsWith("./")) {
++              // B.W.S: The given URL is a relative URL path. Blazor's intent in this case is to
++              // resolve it against the apps "base HREF". The original code used document.baseURI
++              // and also had the implicit assumption that the page's base HREF ended with a
++              // trailing slash. This would ensure the URL concatenation formed the correct full
++              // absolute URL when using the URL constructor.
++              //
++              // In our case, we concatenate with the importBaseUrl provided by B.W.S and that can
++              // be be optionally called by the developer when bootstrapping the app. Out of a
++              // desire to not deviate too much from the original code, we will assume that the
++              // importBaseUrl will always end with a trailing slash.
++              //
++              // NOTE: The original code stripped the leading "./" from the URL. We don't do that
++              // here because it's not necessary. The URL will be resolved correctly by the URL
++              // constructor regardless of whether the leading "./" is present or not.
++              url = new URL(url, importBaseUrl).toString();
++          }
++          else if (url.startsWith("/")) {
++              // B.W.S: The given URL is an absolute URL path. In the original code, this would have
++              // been passed directly to the dynamic import below. However, in our case of a Blazor
++              // application mounted in a single-spa application at a non-root path, we need to
++              // ensure the URL is resolved relative to that mount point. The developer specifies
++              // this when they configure the importBaseUrl, so we use that here. In this case, we
++              // DO need to trim off the leading slash in order for the full absolute URL to be
++              // resolved correctly by the URL constructor.
++              url = new URL(url.substring(1), importBaseUrl).toString();
++          }
        }
  
        return import(/* webpackIgnore: true */ url);
-@@ -686,4 +698,14 @@ export module DotNet {
+@@ -686,4 +712,14 @@ export module DotNet {
  
        return value;
    }
