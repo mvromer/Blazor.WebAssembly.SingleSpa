@@ -1,0 +1,13 @@
+diff --git a/src/Components/Web.JS/src/webpack.config.js b/src/Components/Web.JS/src/webpack.config.js
+index 3b8ce9b295..f2fa847d9c 100644
+--- a/src/Components/Web.JS/src/webpack.config.js
++++ b/src/Components/Web.JS/src/webpack.config.js
+@@ -30,7 +30,7 @@ module.exports = (env, args) => ({
+         providedExports: true,
+         usedExports: true,
+         innerGraph: true,
+-        minimize: true,
++        minimize: false,
+         minimizer: [new TerserJsPlugin({
+             terserOptions: {
+                 ecma: 2019,
