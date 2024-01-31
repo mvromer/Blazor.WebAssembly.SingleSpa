@@ -1,12 +1,3 @@
-diff --git a/src/Components/Web.JS/dist/Release/blazor.server.js b/src/Components/Web.JS/dist/Release/blazor.server.js
-index ba09c85d88..1d36271c78 100644
-Binary files a/src/Components/Web.JS/dist/Release/blazor.server.js and b/src/Components/Web.JS/dist/Release/blazor.server.js differ
-diff --git a/src/Components/Web.JS/dist/Release/blazor.web.js b/src/Components/Web.JS/dist/Release/blazor.web.js
-index d28bd9c18d..210bf1e51f 100644
-Binary files a/src/Components/Web.JS/dist/Release/blazor.web.js and b/src/Components/Web.JS/dist/Release/blazor.web.js differ
-diff --git a/src/Components/Web.JS/dist/Release/blazor.webview.js b/src/Components/Web.JS/dist/Release/blazor.webview.js
-index afc283f9f2..d9a6f2be16 100644
-Binary files a/src/Components/Web.JS/dist/Release/blazor.webview.js and b/src/Components/Web.JS/dist/Release/blazor.webview.js differ
 diff --git a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
 index 4a237e391c..d1d2839ec9 100644
 --- a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
