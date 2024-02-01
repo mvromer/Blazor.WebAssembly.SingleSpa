@@ -1,3 +1,38 @@
+diff --git a/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts b/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
+index 7496dd5522..635555680e 100644
+--- a/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
++++ b/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
+@@ -84,6 +84,7 @@ export class BrowserRenderer {
+   }
+
+   public disposeComponent(componentId: number): void {
++    console.log('Calling disposeComponent for component', componentId);
+     if (this.rootComponentIds.delete(componentId)) {
+       // When disposing a root component, the container element won't be removed from the DOM (because there's
+       // no parent to remove that child), so we empty it to restore it to the state it was in before the root
+@@ -99,6 +100,8 @@ export class BrowserRenderer {
+     }
+
+     delete this.childComponentLocations[componentId];
++    console.log('Called disposeComponent for component', componentId);
++    console.log('After disposeComponent, root component count is', this.rootComponentIds.size);
+   }
+
+   public disposeEventHandler(eventHandlerId: number): void {
+diff --git a/src/Components/Web.JS/src/Rendering/JSRootComponents.ts b/src/Components/Web.JS/src/Rendering/JSRootComponents.ts
+index a18a7f2d6c..a838f5bf11 100644
+--- a/src/Components/Web.JS/src/Rendering/JSRootComponents.ts
++++ b/src/Components/Web.JS/src/Rendering/JSRootComponents.ts
+@@ -104,7 +104,9 @@ class DynamicRootComponent {
+
+   async dispose() {
+     if (this._componentId !== null) {
++      console.log('Calling dispose on component', this._componentId);
+       await getRequiredManager().invokeMethodAsync('RemoveRootComponent', this._componentId);
++      console.log('Called dispose on component', this._componentId);
+       this._componentId = null; // Ensure it can't be used again
+
+       for (const jsEventCallbackWrapper of this._jsEventCallbackWrappers.values()) {
 diff --git a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
 index 4a237e391c..d1d2839ec9 100644
 --- a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
@@ -37,10 +72,10 @@ index 4a237e391c..d1d2839ec9 100644
 +              url = new URL(url.substring(1), importBaseUrl).toString();
 +          }
        }
- 
+
        return import(/* webpackIgnore: true */ url);
 @@ -686,4 +712,14 @@ export module DotNet {
- 
+
        return value;
    }
 +
