@@ -1,3 +1,29 @@
+diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts b/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts
+index f6d3824f32..fc8df49c3c 100644
+--- a/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts
++++ b/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts
+@@ -18,6 +18,10 @@ import { MonoConfig } from 'dotnet';
+ import { RootComponentManager } from './Services/RootComponentManager';
+ import { WebRendererId } from './Rendering/WebRendererId';
+ 
++// B.W.S: Import the function used to configure the navigation base URL used by the Blazor
++// Navigation Manager.
++import { setNavigationBaseUrl } from './Services/NavigationUtils';
++
+ let options: Partial<WebAssemblyStartOptions> | undefined;
+ let initializersPromise: Promise<void>;
+ let platformLoadPromise: Promise<void> | undefined;
+@@ -128,6 +132,10 @@ async function startCore(components: RootComponentManager<WebAssemblyComponentDe
+     }
+   };
+ 
++  // B.W.S: Configure the navigation base URL used by the Blazor Navigation Manager prior to
++  // starting the Blazor application.
++  setNavigationBaseUrl(options?.navigationBaseUrl ?? new URL(document.baseURI));
++
+   Blazor._internal.navigationManager.listenForNavigationEvents(WebRendererId.WebAssembly, async (uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
+     await dispatcher.invokeDotNetStaticMethodAsync(
+       'Microsoft.AspNetCore.Components.WebAssembly',
 diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.ts b/src/Components/Web.JS/src/Boot.WebAssembly.ts
 index bd8e556096..2561ae74e1 100644
 --- a/src/Components/Web.JS/src/Boot.WebAssembly.ts
@@ -72,7 +98,7 @@ index 9b0089c2e7..37f63b25a3 100644
        return path;
      }
 diff --git a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts b/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
-index 1a0af87a0e..ba5d1400e9 100644
+index 1a0af87a0e..f472b37731 100644
 --- a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
 +++ b/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
 @@ -30,6 +30,58 @@ export interface WebAssemblyStartOptions {
@@ -134,6 +160,79 @@ index 1a0af87a0e..ba5d1400e9 100644
    /**
     * Allows to override .NET runtime configuration.
     */
+diff --git a/src/Components/Web.JS/src/Services/NavigationManager.ts b/src/Components/Web.JS/src/Services/NavigationManager.ts
+index 7a6e0bbbbf..31afddd2b8 100644
+--- a/src/Components/Web.JS/src/Services/NavigationManager.ts
++++ b/src/Components/Web.JS/src/Services/NavigationManager.ts
+@@ -9,6 +9,10 @@ import { WebRendererId } from '../Rendering/WebRendererId';
+ import { isRendererAttached } from '../Rendering/WebRendererInteropMethods';
+ import { IBlazor } from '../GlobalExports';
+ 
++// B.W.S: Import the navigation base URL so that it can be returned by the navigation manager's
++// internal API.
++import { navigationBaseUrl } from './NavigationUtils';
++
+ let hasRegisteredNavigationEventListeners = false;
+ let currentHistoryIndex = 0;
+ let currentLocationChangingCallId = 0;
+@@ -33,7 +37,8 @@ export const internalFunctions = {
+   endLocationChanging,
+   navigateTo: navigateToFromDotNet,
+   refresh,
+-  getBaseURI: (): string => document.baseURI,
++  // B.W.S: Use the configured navigation base URL as the value reported by the navigation manager.
++  getBaseURI: (): string => navigationBaseUrl.toString(),
+   getLocationHref: (): string => location.href,
+   scrollToElement,
+ };
+diff --git a/src/Components/Web.JS/src/Services/NavigationUtils.ts b/src/Components/Web.JS/src/Services/NavigationUtils.ts
+index a278ac5414..b406ff4654 100644
+--- a/src/Components/Web.JS/src/Services/NavigationUtils.ts
++++ b/src/Components/Web.JS/src/Services/NavigationUtils.ts
+@@ -7,6 +7,14 @@ let interactiveRouterRendererId: WebRendererId | undefined = undefined;
+ let programmaticEnhancedNavigationHandler: typeof performProgrammaticEnhancedNavigation | undefined;
+ let enhancedNavigationListener: typeof notifyEnhancedNavigationListners | undefined;
+ 
++// B.W.S: We store the navigation base URL here and make it available for other components, notably
++// the Blazor navigation manager, to import and use it. To preserve as much as possible Blazor's
++// default behavior, we set the navigation base URL to the current page's base URL.
++export let navigationBaseUrl: URL = new URL(document.baseURI);
++export function setNavigationBaseUrl(baseUrl: URL) {
++  navigationBaseUrl = baseUrl;
++}
++
+ /**
+  * Checks if a click event corresponds to an <a> tag referencing a URL within the base href, and that interception
+  * isn't bypassed (e.g., by a 'download' attribute or the user holding a meta key while clicking).
+@@ -40,7 +48,10 @@ export function handleClickForNavigationInterception(event: MouseEvent, callback
+ }
+ 
+ export function isWithinBaseUriSpace(href: string) {
+-  const baseUriWithoutTrailingSlash = toBaseUriWithoutTrailingSlash(document.baseURI!);
++  // B.W.S: Compute the base URL using configured navigation base URL. Original code explicitly used
++  // the page's base URL, which is what the navigation base URL will default to as a way of
++  // preserving Blazor's original behavior as much as possible.
++  const baseUriWithoutTrailingSlash = toBaseUriWithoutTrailingSlash(navigationBaseUrl.toString());
+   const nextChar = href.charAt(baseUriWithoutTrailingSlash.length);
+ 
+   return href.startsWith(baseUriWithoutTrailingSlash)
+@@ -78,7 +89,15 @@ function toBaseUriWithoutTrailingSlash(baseUri: string) {
+ let testAnchor: HTMLAnchorElement;
+ export function toAbsoluteUri(relativeUri: string): string {
+   testAnchor = testAnchor || document.createElement('a');
+-  testAnchor.href = relativeUri;
++  // B.W.S: The original implementation simply set the test anchor's href attribute to the given
++  // relative URL. Doing so will cause the browser to resolve the anchor's href to the page's base
++  // URL. In the case of a Blazor micro-frontend, the page's base URL does not necessarily
++  // correspond with the navigation base URL used by the Blazor application's navigation manager.
++  // Since toAbsoluteUri is primarily used for building URLs that are then tested to determine if
++  // Blazor should perform an internal or external navigation, we always apply the navigation base
++  // URL when setting the test anchor's href. When the default navigation base URL is used, it will
++  // apply the page's base URL, which preserves as much as possible Blazor's original behavior.
++  testAnchor.href = new URL(relativeUri, navigationBaseUrl).toString();
+   return testAnchor.href;
+ }
+ 
 diff --git a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
 index 4a237e391c..402ec3b9f6 100644
 --- a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
