@@ -20,8 +20,59 @@ index bd8e556096..2561ae74e1 100644
  
    JSEventRegistry.create(Blazor);
    const webAssemblyComponents = discoverComponents(document, 'webassembly') as WebAssemblyComponentDescriptor[];
+diff --git a/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts b/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts
+index ff5bc46426..0e843fea65 100644
+--- a/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts
++++ b/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts
+@@ -21,7 +21,9 @@ export async function fetchAndInvokeInitializers(options: Partial<WebAssemblySta
+       WebRendererId.WebAssembly
+     );
+     const initializers = Object.keys((loadedConfig?.resources?.['libraryInitializers']) || {});
+-    await jsInitializer.importInitializersAsync(initializers, initializerArguments);
++    // B.W.S: Pass down the asset base URL to the initializer so that it can resolve relative and
++    // absolute URL paths to the initializer's module.
++    await jsInitializer.importInitializersAsync(initializers, initializerArguments, options.assetBaseUrl);
+     return jsInitializer;
+   }
+ }
+diff --git a/src/Components/Web.JS/src/JSInitializers/JSInitializers.ts b/src/Components/Web.JS/src/JSInitializers/JSInitializers.ts
+index 9b0089c2e7..37f63b25a3 100644
+--- a/src/Components/Web.JS/src/JSInitializers/JSInitializers.ts
++++ b/src/Components/Web.JS/src/JSInitializers/JSInitializers.ts
+@@ -38,14 +38,29 @@ export class JSInitializer {
+     }
+   }
+ 
+-  async importInitializersAsync(initializerFiles: string[], initializerArguments: unknown[]): Promise<void> {
++  async importInitializersAsync(initializerFiles: string[], initializerArguments: unknown[], assetBaseUrl?: URL): Promise<void> {
+     // This code is not called on WASM, because library intializers are imported by runtime.
+ 
++    // B.W.S: Similar to all other assets loaded by a Blazor micro-frontend, the JavaScript
++    // initializer may be hosted at a different URL than the page's base URL. Thus, we need to allow
++    // for the absolute and relative paths to the initializer's module to be resolved against a
++    // custom asset base URL if one is provided.
++    //
++    // NOTE: Even though the original comment above says this code is not called in the WASM case,
++    // it looks like this code is executed by the other variants of Blazor (Blazor Web App, Blazor
++    // Server, etc.). Looking to the future, it's possible the changes provided by B.W.S. can also
++    // be applied to at least the Blazor Web App case when the interactive client render mode is
++    // enabled. To prepare for that, we proactively ensure our custom asset base URL is applied here
++    // and fallback to the document's base URL if one is not provided in order to preserve Blazor's
++    // original behavior.
++    const initializerBaseUrl = (assetBaseUrl ?? new URL(document.baseURI)).toString();
++
+     await Promise.all(initializerFiles.map(f => importAndInvokeInitializer(this, f)));
+ 
+     function adjustPath(path: string): string {
+       // This is the same we do in JS interop with the import callback
+-      const base = document.baseURI;
++      // B.W.S: Apply the base URL computed above to use when importing the initializer's module.
++      const base = initializerBaseUrl;
+       path = base.endsWith('/') ? `${base}${path}` : `${base}/${path}`;
+       return path;
+     }
 diff --git a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts b/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
-index 1a0af87a0e..f472b37731 100644
+index 1a0af87a0e..ba5d1400e9 100644
 --- a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
 +++ b/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
 @@ -30,6 +30,58 @@ export interface WebAssemblyStartOptions {
