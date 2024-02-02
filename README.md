@@ -12,6 +12,7 @@ specific versions of ASP.NET Core:
 Target Framework Version | ASP.NET Core Version
 -------------------------|---------------------
 .NET 7                   | 7.0.15
+.NET 8                   | 8.0.1
 
 For a given target framework version, this package _may_ work for previous minor/patch releases.
 However, no guarantees are given.
@@ -54,9 +55,9 @@ the correct package location.
 
 ### Installing prerequisites
 
-Building this package requires .NET SDK 7+, Node.js 16.9+, Yarn 1, and PowerShell 7+.
+Building this package requires .NET SDK 8+, Node.js 16.9+, Yarn 1, and PowerShell 7+.
 
-#### .NET SDK 7+
+#### .NET SDK 8+
 
 Download from [here](https://dotnet.microsoft.com/en-us/download).
 
