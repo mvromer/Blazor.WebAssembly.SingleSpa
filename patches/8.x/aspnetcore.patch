@@ -1,43 +1,93 @@
-diff --git a/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts b/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
-index 7496dd5522..635555680e 100644
---- a/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
-+++ b/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
-@@ -84,6 +84,7 @@ export class BrowserRenderer {
+diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.ts b/src/Components/Web.JS/src/Boot.WebAssembly.ts
+index bd8e556096..2561ae74e1 100644
+--- a/src/Components/Web.JS/src/Boot.WebAssembly.ts
++++ b/src/Components/Web.JS/src/Boot.WebAssembly.ts
+@@ -20,7 +20,16 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
    }
-
-   public disposeComponent(componentId: number): void {
-+    console.log('Calling disposeComponent for component', componentId);
-     if (this.rootComponentIds.delete(componentId)) {
-       // When disposing a root component, the container element won't be removed from the DOM (because there's
-       // no parent to remove that child), so we empty it to restore it to the state it was in before the root
-@@ -99,6 +100,8 @@ export class BrowserRenderer {
-     }
-
-     delete this.childComponentLocations[componentId];
-+    console.log('Called disposeComponent for component', componentId);
-+    console.log('After disposeComponent, root component count is', this.rootComponentIds.size);
-   }
-
-   public disposeEventHandler(eventHandlerId: number): void {
-diff --git a/src/Components/Web.JS/src/Rendering/JSRootComponents.ts b/src/Components/Web.JS/src/Rendering/JSRootComponents.ts
-index a18a7f2d6c..a838f5bf11 100644
---- a/src/Components/Web.JS/src/Rendering/JSRootComponents.ts
-+++ b/src/Components/Web.JS/src/Rendering/JSRootComponents.ts
-@@ -104,7 +104,9 @@ class DynamicRootComponent {
-
-   async dispose() {
-     if (this._componentId !== null) {
-+      console.log('Calling dispose on component', this._componentId);
-       await getRequiredManager().invokeMethodAsync('RemoveRootComponent', this._componentId);
-+      console.log('Called dispose on component', this._componentId);
-       this._componentId = null; // Ensure it can't be used again
-
-       for (const jsEventCallbackWrapper of this._jsEventCallbackWrappers.values()) {
+   started = true;
+ 
+-  setWebAssemblyOptions(Promise.resolve(options || {}));
++  // B.W.S: Ensure navigation and asset base URLs default to the current page's base URL to preserve
++  // as much as possible Blazor's default behavior. Also, set the base URL Microsoft.JSInterop.JS
++  // will use when resolving relative or absolute URL paths to dynamically imported JavaScript
++  // modules so that any dynamic imports triggered by the Blazor application starting can properly
++  // locate their resources.
++  options ??= {};
++  options.assetBaseUrl ??= new URL(document.baseURI);
++  options.navigationBaseUrl ??= new URL(document.baseURI);
++  DotNet.setImportBaseUrl(options.assetBaseUrl);
++  setWebAssemblyOptions(Promise.resolve(options));
+ 
+   JSEventRegistry.create(Blazor);
+   const webAssemblyComponents = discoverComponents(document, 'webassembly') as WebAssemblyComponentDescriptor[];
+diff --git a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts b/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
+index 1a0af87a0e..f472b37731 100644
+--- a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
++++ b/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
+@@ -30,6 +30,58 @@ export interface WebAssemblyStartOptions {
+ 
+   initializers?: WebAssemblyInitializers;
+ 
++  /**
++   * B.W.S: Base URL that will be used when resolving both relative URL paths and absolute URL
++   * paths to assets loaded by either Blazor or the .NET browser (WASM) runtime. These assets are
++   * typically things like assemblies, runtime configuration files, and globalization data. It also
++   * includes any JavaScript modules dynamically imported by Blazor via Microsoft.JSInterop.JS;
++   * however, it won't cover JS modules dynamically imported via .NET browser runtime. It hasn't
++   * been verified yet, but it appears that the .NET browser runtime will give a custom resource
++   * loader the chance to resolve an alternate URL for those assets. If that's the case, then the
++   * custom resource loader could apply the asset base URL to resolve those URLs.
++   *
++   * If this is not provided, then this will default to document.baseURI, which is what Blazor and
++   * the .NET browser runtime either directly use or implicitly assume when resolving relative and
++   * absolute path URLs to assets. Ig given, this must end in a trailing slash.
++   *
++   * Rationale: Different micro-frontends, whether implemented by Blazor or not, will typically be
++   * hosted at different URLs that don't necessarily (and most likely won't) match the page's base
++   * URL. Thus, when a Blazor micro-frontend's assets are fetched or its modules dynamically
++   * imported by relative or absolute URL paths, we need to ensure that those assets are ultimately
++   * retrieved from the proper location.
++   *
++   * NOTE: There appear to be some cases in the .NET browser runtime where an asset will be
++   * retrieved using a custom fetch_like function. Internally, it appears this function will use the
++   * global fetch function, but it will specifically set its credentials option to 'same-origin'.
++   * The running theory is that if this is true and if the assets retrieved using this fetch_like
++   * are processed by a custom resource loader that returned an alternate URL, then the loader would
++   * need to possibly ensure the alternate URL is at the same origin as the page if it required
++   * credentials (e.g., cookies) to be sent with the request. Furthermore, it may be possible that
++   * some of those assets, when loaded by a custom resource loader, must resolve to URL strings as
++   * opposed to, e.g., Response objects wrapped in a Promise. If this turns out to be true, then it
++   * would mean that the asset base URL and any custom resource loader must resolve URLs that are
++   * hosted at the same origin as the page.
++   */
++  assetBaseUrl?: URL;
++
++  /**
++   * B.W.S: Base URL the Blazor navigation manager will use internal routing decisions. If not
++   * given, defaults to document.baseURI, which is what Blazor uses directly by default. If given,
++   * this must end in a trailing slash.
++   *
++   * Rationale: Different Blazor micro-frontends managed by single-spa will live at different
++   * client-side routes, e.g., https://example.com/blazor-foo/ and https://example.com/blazor-bar/.
++   * The page's base URL (given by document.baseURI) will typically be simply https://example.com/
++   * (if it is explicitly set by the page's HTML) or will be inferred from the page's current
++   * location. Neither or these will be suitable for both Blazor micro-frontends when their
++   * respective navigation managers attempt to determine 1) if a particular navigation to a new URL
++   * should be considered internal to the Blazor application or external and 2) what the new URL
++   * should be in the case of an internal navigation. Providing a navigation base URL allows the
++   * app developer to specify an appropriate URL that the Blazor navigation manager can use when
++   * making its internal routing decisions.
++   */
++  navigationBaseUrl?: URL;
++
+   /**
+    * Allows to override .NET runtime configuration.
+    */
 diff --git a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
-index 4a237e391c..d1d2839ec9 100644
+index 4a237e391c..402ec3b9f6 100644
 --- a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
 +++ b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
-@@ -71,8 +71,34 @@ export module DotNet {
+@@ -71,8 +71,38 @@ export module DotNet {
        // In most cases developers will want to resolve dynamic imports relative to the base HREF.
        // However since we're the one calling the import keyword, they would be resolved relative to
        // this framework bundle URL. Fix this by providing an absolute URL.
@@ -48,44 +98,50 @@ index 4a237e391c..d1d2839ec9 100644
 +              // B.W.S: The given URL is a relative URL path. Blazor's intent in this case is to
 +              // resolve it against the apps "base HREF". The original code used document.baseURI
 +              // and also had the implicit assumption that the page's base HREF ended with a
-+              // trailing slash. This would ensure the URL concatenation formed the correct full
-+              // absolute URL when using the URL constructor.
++              // trailing slash. This would ensure the URL concatenation formed the correct absolute
++              // URL when using the URL constructor.
 +              //
-+              // In our case, we concatenate with the importBaseUrl provided by B.W.S and that can
-+              // be be optionally called by the developer when bootstrapping the app. Out of a
-+              // desire to not deviate too much from the original code, we will assume that the
-+              // importBaseUrl will always end with a trailing slash.
++              // In our case, we concatenate with the importBaseUrl the app developer provides when
++              // they specify the assetBaseUrl to Blazor.start. Out of a desire to not deviate too
++              // much from the original code, we will assume that the importBaseUrl will always end
++              // with a trailing slash rather than forcing a trailing slash on the import base URL
++              // if it's missing.
 +              //
 +              // NOTE: The original code stripped the leading "./" from the URL. We don't do that
 +              // here because it's not necessary. The URL will be resolved correctly by the URL
 +              // constructor regardless of whether the leading "./" is present or not.
 +              url = new URL(url, importBaseUrl).toString();
-+          }
-+          else if (url.startsWith("/")) {
++          } else if (url.startsWith("/")) {
 +              // B.W.S: The given URL is an absolute URL path. In the original code, this would have
-+              // been passed directly to the dynamic import below. However, in our case of a Blazor
-+              // application mounted in a single-spa application at a non-root path, we need to
-+              // ensure the URL is resolved relative to that mount point. The developer specifies
-+              // this when they configure the importBaseUrl, so we use that here. In this case, we
-+              // DO need to trim off the leading slash in order for the full absolute URL to be
-+              // resolved correctly by the URL constructor.
++              // been passed directly to the dynamic import below, resulting in the import fetching
++              // the JavaScript module from the root of the page's origin itself.
++              //
++              // However, in the case of a Blazor application managed by single-spa, it's typical
++              // that the application is hosting its assets at a location that differs from the root
++              // of the page's origin. When resolving the absolute path URL, we form a URL that
++              // takes the configured import base URL and concatenates the given absolute path URL
++              // to it. Since we assume the import base URL has a trailing slash, we DO need to trim
++              // off the leading slash in order for the final absolute URL to preserve any path base
++              // the import base URL contains.
 +              url = new URL(url.substring(1), importBaseUrl).toString();
 +          }
        }
-
+ 
        return import(/* webpackIgnore: true */ url);
-@@ -686,4 +712,14 @@ export module DotNet {
-
+@@ -686,4 +716,16 @@ export module DotNet {
+ 
        return value;
    }
 +
-+  // B.W.S: The importBaseUrl will be used when converting relative and absolute path URLs to full
++  // B.W.S: The importBaseUrl will be used when converting relative and absolute path URLs to
 +  // absolute URLs (ones that include the scheme, host, port, and app base path etc.). These are
 +  // then used when resolving dynamic imports in the import function registered for invocation from
 +  // .NET code running in the browser. The original code used document.baseURI as the base URL when
-+  // resolving dynamic imports, thus we choose to initialize the importBaseUrl to that value.
-+  let importBaseUrl = document.baseURI;
-+  export function setImportBaseUrl(url: string) {
++  // resolving dynamic imports, thus we choose to initialize the importBaseUrl to that value to
++  // preserve as much as possible Blazor's default behavior.
++  let importBaseUrl: URL = new URL(document.baseURI);
++
++  export function setImportBaseUrl(url: URL) {
 +    importBaseUrl = url;
 +  }
  }
