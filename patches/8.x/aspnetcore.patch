@@ -1,5 +1,5 @@
 diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts b/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts
-index f6d3824f32..fc8df49c3c 100644
+index f6d3824f32..700490eb6f 100644
 --- a/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts
 +++ b/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts
 @@ -18,6 +18,10 @@ import { MonoConfig } from 'dotnet';
@@ -13,17 +13,76 @@ index f6d3824f32..fc8df49c3c 100644
  let options: Partial<WebAssemblyStartOptions> | undefined;
  let initializersPromise: Promise<void>;
  let platformLoadPromise: Promise<void> | undefined;
-@@ -128,6 +132,10 @@ async function startCore(components: RootComponentManager<WebAssemblyComponentDe
+@@ -128,25 +132,13 @@ async function startCore(components: RootComponentManager<WebAssemblyComponentDe
      }
    };
  
+-  Blazor._internal.navigationManager.listenForNavigationEvents(WebRendererId.WebAssembly, async (uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
+-    await dispatcher.invokeDotNetStaticMethodAsync(
+-      'Microsoft.AspNetCore.Components.WebAssembly',
+-      'NotifyLocationChanged',
+-      uri,
+-      state,
+-      intercepted
+-    );
+-  }, async (callId: number, uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
+-    const shouldContinueNavigation = await dispatcher.invokeDotNetStaticMethodAsync<boolean>(
+-      'Microsoft.AspNetCore.Components.WebAssembly',
+-      'NotifyLocationChangingAsync',
+-      uri,
+-      state,
+-      intercepted
+-    );
+-
+-    Blazor._internal.navigationManager.endLocationChanging(callId, shouldContinueNavigation);
+-  });
 +  // B.W.S: Configure the navigation base URL used by the Blazor Navigation Manager prior to
 +  // starting the Blazor application.
 +  setNavigationBaseUrl(options?.navigationBaseUrl ?? new URL(document.baseURI));
 +
-   Blazor._internal.navigationManager.listenForNavigationEvents(WebRendererId.WebAssembly, async (uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
-     await dispatcher.invokeDotNetStaticMethodAsync(
-       'Microsoft.AspNetCore.Components.WebAssembly',
++  // B.W.S: The original direct call to the navigation manager's listenForNavigationEvents function
++  // is now factored to the addNavigationEventListeners function that is called here.
++  addWebAssemblyNavigationEventListeners();
+ 
+   // Leverage the time while we are loading boot.config.json from the network to discover any potentially registered component on
+   // the document.
+@@ -229,6 +221,36 @@ export function hasLoadedWebAssemblyPlatform(): boolean {
+   return loadedWebAssemblyPlatform;
+ }
+ 
++// B.W.S: This adds the navigation event listeners used by the Blazor WebAssembly renderer. In the
++// original code, the call to listenForNavigationEvents was done directly in the startCore function,
++// but it was moved here to make it possible for this function to be called from the mount lifecycle
++// hook of a Blazor micro-frontend when single-spa remounts it to the page.
++export function addWebAssemblyNavigationEventListeners() {
++  Blazor._internal.navigationManager.listenForNavigationEvents(
++    WebRendererId.WebAssembly,
++    async (uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
++      await dispatcher.invokeDotNetStaticMethodAsync(
++        'Microsoft.AspNetCore.Components.WebAssembly',
++        'NotifyLocationChanged',
++        uri,
++        state,
++        intercepted
++      );
++    },
++    async (callId: number, uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
++      const shouldContinueNavigation = await dispatcher.invokeDotNetStaticMethodAsync<boolean>(
++        'Microsoft.AspNetCore.Components.WebAssembly',
++        'NotifyLocationChangingAsync',
++        uri,
++        state,
++        intercepted
++      );
++
++      Blazor._internal.navigationManager.endLocationChanging(callId, shouldContinueNavigation);
++    }
++  );
++}
++
+ // obsolete, legacy, don't use for new code!
+ function invokeJSFromDotNet(callInfo: Pointer, arg0: any, arg1: any, arg2: any): any {
+   const functionIdentifier = monoPlatform.readStringField(callInfo, 0)!;
 diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.ts b/src/Components/Web.JS/src/Boot.WebAssembly.ts
 index bd8e556096..2561ae74e1 100644
 --- a/src/Components/Web.JS/src/Boot.WebAssembly.ts
@@ -46,6 +105,26 @@ index bd8e556096..2561ae74e1 100644
  
    JSEventRegistry.create(Blazor);
    const webAssemblyComponents = discoverComponents(document, 'webassembly') as WebAssemblyComponentDescriptor[];
+diff --git a/src/Components/Web.JS/src/GlobalExports.ts b/src/Components/Web.JS/src/GlobalExports.ts
+index 4af7b56fbf..ea3954f8be 100644
+--- a/src/Components/Web.JS/src/GlobalExports.ts
++++ b/src/Components/Web.JS/src/GlobalExports.ts
+@@ -44,6 +44,15 @@ export interface IBlazor {
+   rootComponents: typeof RootComponentsFunctions;
+   runtime: RuntimeAPI,
+ 
++  // B.W.S:
++  ensureDomListenersReady?: () => void;
++
++  // B.W.S:
++  ensureRootComponentsDisposed?: () => Promise<void>;
++
++  // B.W.S:
++  ensureDomListenersRemoved?: () => void;
++
+   _internal: {
+     navigationManager: typeof navigationManagerInternalFunctions | any;
+     domWrapper: typeof domFunctions;
 diff --git a/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts b/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts
 index ff5bc46426..0e843fea65 100644
 --- a/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts
@@ -161,10 +240,16 @@ index 1a0af87a0e..f472b37731 100644
     * Allows to override .NET runtime configuration.
     */
 diff --git a/src/Components/Web.JS/src/Services/NavigationManager.ts b/src/Components/Web.JS/src/Services/NavigationManager.ts
-index 7a6e0bbbbf..31afddd2b8 100644
+index 7a6e0bbbbf..5be35fb02b 100644
 --- a/src/Components/Web.JS/src/Services/NavigationManager.ts
 +++ b/src/Components/Web.JS/src/Services/NavigationManager.ts
-@@ -9,6 +9,10 @@ import { WebRendererId } from '../Rendering/WebRendererId';
+@@ -4,11 +4,15 @@
+ import '@microsoft/dotnet-js-interop';
+ import { resetScrollAfterNextBatch } from '../Rendering/Renderer';
+ import { EventDelegator } from '../Rendering/Events/EventDelegator';
+-import { attachEnhancedNavigationListener, getInteractiveRouterRendererId, handleClickForNavigationInterception, hasInteractiveRouter, hasProgrammaticEnhancedNavigationHandler, isWithinBaseUriSpace, performProgrammaticEnhancedNavigation, setHasInteractiveRouter, toAbsoluteUri } from './NavigationUtils';
++import { attachEnhancedNavigationListener, detachEnhancedNavigationListener, getInteractiveRouterRendererId, handleClickForNavigationInterception, hasInteractiveRouter, hasProgrammaticEnhancedNavigationHandler, isWithinBaseUriSpace, performProgrammaticEnhancedNavigation, setHasInteractiveRouter, toAbsoluteUri } from './NavigationUtils';
+ import { WebRendererId } from '../Rendering/WebRendererId';
  import { isRendererAttached } from '../Rendering/WebRendererInteropMethods';
  import { IBlazor } from '../GlobalExports';
  
@@ -185,8 +270,31 @@ index 7a6e0bbbbf..31afddd2b8 100644
    getLocationHref: (): string => location.href,
    scrollToElement,
  };
+@@ -63,6 +68,22 @@ function listenForNavigationEvents(
+   });
+ }
+ 
++// B.W.S: When a Blazor micro-frontend is unmounted from the page by single-spa, we need to ensure
++// that its navigation manager is no longer responding to any DOM events it cares about for
++// navigation purposes. This is essentially the inverse of listenForNavigationEvents, and it is
++// intended to be called by the Blazor micro-frontend's unmount lifecycle hook.
++export function removeNavigationEventListeners(rendererId: WebRendererId) {
++  navigationCallbacks.delete(rendererId);
++
++  if (!hasRegisteredNavigationEventListeners) {
++    return;
++  }
++
++  hasRegisteredNavigationEventListeners = false;
++  window.removeEventListener('popstate', onPopState);
++  detachEnhancedNavigationListener();
++}
++
+ function setHasLocationChangingListeners(rendererId: WebRendererId, hasListeners: boolean) {
+   const callbacks = navigationCallbacks.get(rendererId);
+   if (!callbacks) {
 diff --git a/src/Components/Web.JS/src/Services/NavigationUtils.ts b/src/Components/Web.JS/src/Services/NavigationUtils.ts
-index a278ac5414..b406ff4654 100644
+index a278ac5414..6c74c3810a 100644
 --- a/src/Components/Web.JS/src/Services/NavigationUtils.ts
 +++ b/src/Components/Web.JS/src/Services/NavigationUtils.ts
 @@ -7,6 +7,14 @@ let interactiveRouterRendererId: WebRendererId | undefined = undefined;
@@ -216,7 +324,20 @@ index a278ac5414..b406ff4654 100644
    const nextChar = href.charAt(baseUriWithoutTrailingSlash.length);
  
    return href.startsWith(baseUriWithoutTrailingSlash)
-@@ -78,7 +89,15 @@ function toBaseUriWithoutTrailingSlash(baseUri: string) {
+@@ -51,6 +62,12 @@ export function attachEnhancedNavigationListener(listener: typeof enhancedNaviga
+   enhancedNavigationListener = listener;
+ }
+ 
++// B.W.S: This is a new function that allows the Blazor navigation manager to detach the enhanced
++// navigation listener whenever the navigation manager unregisters its navigation event listeners.
++export function detachEnhancedNavigationListener() {
++  enhancedNavigationListener = undefined;
++}
++
+ export function notifyEnhancedNavigationListners(internalDestinationHref: string, interceptedLink: boolean) {
+   enhancedNavigationListener?.(internalDestinationHref, interceptedLink);
+ }
+@@ -78,7 +95,15 @@ function toBaseUriWithoutTrailingSlash(baseUri: string) {
  let testAnchor: HTMLAnchorElement;
  export function toAbsoluteUri(relativeUri: string): string {
    testAnchor = testAnchor || document.createElement('a');
