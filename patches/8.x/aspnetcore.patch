@@ -239,8 +239,95 @@ index 1a0af87a0e..f472b37731 100644
    /**
     * Allows to override .NET runtime configuration.
     */
+diff --git a/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts b/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
+index 7496dd5522..cb3b497d32 100644
+--- a/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
++++ b/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
+@@ -5,7 +5,7 @@ import { RenderBatch, ArrayBuilderSegment, RenderTreeEdit, RenderTreeFrame, Edit
+ import { EventDelegator } from './Events/EventDelegator';
+ import { LogicalElement, PermutationListEntry, toLogicalElement, insertLogicalChild, removeLogicalChild, getLogicalParent, getLogicalChild, createAndInsertLogicalContainer, isSvgElement, permuteLogicalChildren, getClosestDomElement, emptyLogicalElement, getLogicalChildrenArray } from './LogicalElements';
+ import { applyCaptureIdToElement } from './ElementReferenceCapture';
+-import { attachToEventDelegator as attachNavigationManagerToEventDelegator } from '../Services/NavigationManager';
++import { attachToEventDelegator as attachNavigationManagerToEventDelegator, detachFromEventDelegator as detachNavigationManagerFromEventDelegator } from '../Services/NavigationManager';
+ import { applyAnyDeferredValue, tryApplySpecialProperty } from './DomSpecialPropertyUtil';
+ const sharedTemplateElemForParsing = document.createElement('template');
+ const sharedSvgElemForParsing = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+@@ -26,12 +26,32 @@ export class BrowserRenderer {
+   public constructor(browserRendererId: number) {
+     this.eventDelegator = new EventDelegator(browserRendererId);
+ 
++    // B.W.S: The original implementation directly called attachNavigationManagerToEventDelegator.
++    // This is now factored to a separate method that is called here. This allows the navigation
++    // manager to be reattached when a Blazor micro-frontend is remounted to the page by single-spa.
++    this.attachNavigationManager();
++  }
++
++  // B.W.S: This method allows a Blazor micro-frontend to reattach the navigation manager to the
++  // renderer's event delegator when the Blazor application is remounted to the page by single-spa.
++  // This will automatically be called when Blazor is first started, specifically when the
++  // BrowserRenderer is first created. Thus, a Blazor micro-frontend should NOT call this method
++  // directly on its first mount. On all subsequent mounts, the micro-frontend should ensure this
++  // method is called, typically via the ensureDomListenersReady function on the Blazor object.
++  public attachNavigationManager(): void {
+     // We don't yet know whether or not navigation interception will be enabled, but in case it will be,
+     // we wire up the navigation manager to the event delegator so it has the option to participate
+     // in the synthetic event bubbling process later
+     attachNavigationManagerToEventDelegator(this.eventDelegator);
+   }
+ 
++  // B.W.S: The inverse of detachNavigationManager. This is intended to be called when a Blazor
++  // micro-frontend is unmounted from the page by single-spa. The micro-frontend typically ensures
++  // this via the ensureDomListenersRemoved function on the Blazor object.
++  public detachNavigationManager(): void {
++    detachNavigationManagerFromEventDelegator(this.eventDelegator);
++  }
++
+   public getRootComponentCount(): number {
+     return this.rootComponentIds.size;
+   }
+diff --git a/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts b/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts
+index 064b6e5ff3..b8c7521de4 100644
+--- a/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts
++++ b/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts
+@@ -121,6 +121,16 @@ export class EventDelegator {
+     this.eventInfoStore.addGlobalListener('click'); // Ensure we always listen for this
+   }
+ 
++  // B.W.S: The inverse of notifyAfterClick. This is called by detachFromEventDelegator, which is
++  // expected to occur when a Blazor micro-frontend is unmounted from the page by single-spa.
++  public removeAfterClickCallback(callback: (event: MouseEvent) => void): void {
++    this.eventInfoStore.removeGlobalListener('click');
++    const index = this.afterClickCallbacks.indexOf(callback);
++    if (index !== -1) {
++      this.afterClickCallbacks.splice(index, 1);
++    }
++  }
++
+   public setStopPropagation(element: Element, eventName: string, value: boolean): void {
+     const infoForElement = this.getEventHandlerInfosForElement(element, true)!;
+     infoForElement.stopPropagation(eventName, value);
+@@ -261,6 +271,19 @@ class EventInfoStore {
+     }
+   }
+ 
++  // B.W.S: The inverse of addGlobalListener. This is called by the EventDelegator when an
++  // after-click callback is removed from it. This is expected to occur when a Blazor micro-frontend
++  // is unmounted from the page by single-spa.
++  public removeGlobalListener(eventName: string) {
++    eventName = getBrowserEventName(eventName);
++
++    if (--this.countByEventName[eventName] === 0) {
++      delete this.countByEventName[eventName];
++      const useCapture = Object.prototype.hasOwnProperty.call(nonBubblingEvents, eventName);
++      document.removeEventListener(eventName, this.globalListener, useCapture);
++    }
++  }
++
+   public update(oldEventHandlerId: number, newEventHandlerId: number) {
+     if (Object.prototype.hasOwnProperty.call(this.infosByEventHandlerId, newEventHandlerId)) {
+       // Should never happen, but we want to know if it does
 diff --git a/src/Components/Web.JS/src/Services/NavigationManager.ts b/src/Components/Web.JS/src/Services/NavigationManager.ts
-index 7a6e0bbbbf..5be35fb02b 100644
+index 7a6e0bbbbf..0dd907efcb 100644
 --- a/src/Components/Web.JS/src/Services/NavigationManager.ts
 +++ b/src/Components/Web.JS/src/Services/NavigationManager.ts
 @@ -4,11 +4,15 @@
@@ -293,6 +380,47 @@ index 7a6e0bbbbf..5be35fb02b 100644
  function setHasLocationChangingListeners(rendererId: WebRendererId, hasListeners: boolean) {
    const callbacks = navigationCallbacks.get(rendererId);
    if (!callbacks) {
+@@ -86,14 +107,33 @@ export function attachToEventDelegator(eventDelegator: EventDelegator): void {
+   // We need to respond to clicks on <a> elements *after* the EventDelegator has finished
+   // running its simulated bubbling process so that we can respect any preventDefault requests.
+   // So instead of registering our own native event, register using the EventDelegator.
+-  eventDelegator.notifyAfterClick(event => {
+-    if (!hasInteractiveRouter()) {
+-      return;
+-    }
+ 
+-    handleClickForNavigationInterception(event, absoluteInternalHref => {
+-      performInternalNavigation(absoluteInternalHref, /* interceptedLink */ true, /* replace */ false);
+-    });
++  // B.W.S: Modified so that the callback is moved to a named function. This allows it to be later
++  // removed from the EventDelegator when a Blazor micro-frontend is unmounted from the page by
++  // single-spa.
++  eventDelegator.notifyAfterClick(afterClickCallback);
++}
++
++// B.W.S: The inverse of attachToEventDelegator. This is expected to be called by each
++// BrowserRenderer (via its detachNavigationManager method) when a Blazor micro-frontend is
++// unmounted from the page by single-spa. This is to prevent the Blazor application from attempting
++// to respond to click events when the application is not active on the page.
++export function detachFromEventDelegator(eventDelegator: EventDelegator): void {
++  eventDelegator.removeAfterClickCallback(afterClickCallback);
++}
++
++// B.W.S: The original implementation had this function defined inline to the call to the
++// notifyAfterClick method inside attachEventDelegator. Since the callback needs to be removed from
++// the EventDelegator when a Blazor micro-frontend is unmounted from the page by single-spa, the
++// callback itself needed to be defined as a named function. This allows the callback to be removed
++// from the EventDelegator's list of callbacks and its EventInfoStore.
++function afterClickCallback(event: MouseEvent): void {
++  if (!hasInteractiveRouter()) {
++    return;
++  }
++
++  handleClickForNavigationInterception(event, absoluteInternalHref => {
++    performInternalNavigation(absoluteInternalHref, /* interceptedLink */ true, /* replace */ false);
+   });
+ }
+ 
 diff --git a/src/Components/Web.JS/src/Services/NavigationUtils.ts b/src/Components/Web.JS/src/Services/NavigationUtils.ts
 index a278ac5414..6c74c3810a 100644
 --- a/src/Components/Web.JS/src/Services/NavigationUtils.ts
