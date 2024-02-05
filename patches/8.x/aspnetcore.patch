@@ -327,7 +327,7 @@ index 064b6e5ff3..b8c7521de4 100644
      if (Object.prototype.hasOwnProperty.call(this.infosByEventHandlerId, newEventHandlerId)) {
        // Should never happen, but we want to know if it does
 diff --git a/src/Components/Web.JS/src/Services/NavigationManager.ts b/src/Components/Web.JS/src/Services/NavigationManager.ts
-index 7a6e0bbbbf..0dd907efcb 100644
+index 7a6e0bbbbf..6e17d09719 100644
 --- a/src/Components/Web.JS/src/Services/NavigationManager.ts
 +++ b/src/Components/Web.JS/src/Services/NavigationManager.ts
 @@ -4,11 +4,15 @@
@@ -357,7 +357,7 @@ index 7a6e0bbbbf..0dd907efcb 100644
    getLocationHref: (): string => location.href,
    scrollToElement,
  };
-@@ -63,6 +68,22 @@ function listenForNavigationEvents(
+@@ -63,6 +68,28 @@ function listenForNavigationEvents(
    });
  }
  
@@ -368,7 +368,13 @@ index 7a6e0bbbbf..0dd907efcb 100644
 +export function removeNavigationEventListeners(rendererId: WebRendererId) {
 +  navigationCallbacks.delete(rendererId);
 +
-+  if (!hasRegisteredNavigationEventListeners) {
++  // B.W.S: We only unregister the navigation event listeners if all navigation callbacks have been
++  // removed. In practice this shouldn't matter because a Blazor micro-frontend that is unmounting
++  // needs to remove all navigation event listeners for all its renderers. Thus, eventually they
++  // should all get removed before the next micro-frontend is mounted by single-spa. However, from
++  // an intent standpoint, it seems like you should only remove the listeners if there are no more
++  // navigation callbacks registered to receive notification of navigation events.
++  if (navigationCallbacks.size === 0 && !hasRegisteredNavigationEventListeners) {
 +    return;
 +  }
 +
@@ -380,7 +386,7 @@ index 7a6e0bbbbf..0dd907efcb 100644
  function setHasLocationChangingListeners(rendererId: WebRendererId, hasListeners: boolean) {
    const callbacks = navigationCallbacks.get(rendererId);
    if (!callbacks) {
-@@ -86,14 +107,33 @@ export function attachToEventDelegator(eventDelegator: EventDelegator): void {
+@@ -86,14 +113,33 @@ export function attachToEventDelegator(eventDelegator: EventDelegator): void {
    // We need to respond to clicks on <a> elements *after* the EventDelegator has finished
    // running its simulated bubbling process so that we can respect any preventDefault requests.
    // So instead of registering our own native event, register using the EventDelegator.
