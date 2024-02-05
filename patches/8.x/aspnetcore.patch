@@ -84,7 +84,7 @@ index f6d3824f32..700490eb6f 100644
  function invokeJSFromDotNet(callInfo: Pointer, arg0: any, arg1: any, arg2: any): any {
    const functionIdentifier = monoPlatform.readStringField(callInfo, 0)!;
 diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.ts b/src/Components/Web.JS/src/Boot.WebAssembly.ts
-index bd8e556096..55754a279f 100644
+index bd8e556096..a2fc1b472c 100644
 --- a/src/Components/Web.JS/src/Boot.WebAssembly.ts
 +++ b/src/Components/Web.JS/src/Boot.WebAssembly.ts
 @@ -6,13 +6,23 @@ import { Blazor } from './GlobalExports';
@@ -112,7 +112,7 @@ index bd8e556096..55754a279f 100644
  
  async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
    if (started) {
-@@ -20,15 +30,62 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
+@@ -20,15 +30,65 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
    }
    started = true;
  
@@ -139,8 +139,7 @@ index bd8e556096..55754a279f 100644
 +  domListenersReady = true;
 +}
 +
-+// B.W.S: This is intended to be called when a Blazor micro-frontend is mounted on the page by
-+// single-spa. This is to ensure that any DOM listeners that Blazor has added are ready to go so
++// B.W.S: See updates to IBlazor for detailed explanation.
 +function ensureDomListenersReady() {
 +  if (domListenersReady) {
 +    return;
@@ -155,10 +154,13 @@ index bd8e556096..55754a279f 100644
 +  domListenersReady = true;
 +}
 +
-+// B.W.S: This is intended to be called when a Blazor micro-frontend is unmounted from the page by
-+// single-spa. This is to ensure that any DOM listeners that Blazor has added are removed so that
-+// they will not interfere with, e.g., client-side routing of any micro-frontends that are
-+// subsequently mounted on the page.
++// B.W.S: See updates to IBlazor for detailed explanation.
++function ensureRazorComponentsDisposed() {
++  const renderers = getRenderers();
++  return Promise.all(renderers.map(renderer => renderer.componentsDisposed));
++}
++
++// B.W.S: See updates to IBlazor for detailed explanation.
 +function ensureDomListenersRemoved() {
 +  const renderers = getRenderers();
 +  for (const renderer of renderers) {
@@ -172,25 +174,39 @@ index bd8e556096..55754a279f 100644
  Blazor.start = boot;
 +// B.W.S: Install additional APIs exposed by Blazor.WebAssembly.SingleSpa.
 +Blazor.ensureDomListenersReady = ensureDomListenersReady;
++Blazor.ensureRazorComponentsDisposed = ensureRazorComponentsDisposed;
 +Blazor.ensureDomListenersRemoved = ensureDomListenersRemoved;
  window['DotNet'] = DotNet;
  
  if (shouldAutoStart()) {
 diff --git a/src/Components/Web.JS/src/GlobalExports.ts b/src/Components/Web.JS/src/GlobalExports.ts
-index 4af7b56fbf..ea3954f8be 100644
+index 4af7b56fbf..a2728c2d67 100644
 --- a/src/Components/Web.JS/src/GlobalExports.ts
 +++ b/src/Components/Web.JS/src/GlobalExports.ts
-@@ -44,6 +44,15 @@ export interface IBlazor {
+@@ -44,6 +44,28 @@ export interface IBlazor {
    rootComponents: typeof RootComponentsFunctions;
    runtime: RuntimeAPI,
  
-+  // B.W.S:
++  // B.W.S: This is intended to be called when a Blazor micro-frontend is mounted on the page by
++  // single-spa. This is to ensure that any DOM listeners Blazor depends on for client-side
++  // navigation are added to the appropriate DOM elements before allowing the micro-frontend to
++  // complete its mount lifecycle event.
 +  ensureDomListenersReady?: () => void;
 +
-+  // B.W.S:
-+  ensureRootComponentsDisposed?: () => Promise<void>;
++  // B.W.S: This is intended to be called and awaited when a Blazor micro-frontend is unmounted from
++  // the page by single-spa. This is to ensure that the Razor components have had a chance to
++  // dispose themselves before the micro-frontend completes its unmount lifecycle hook. This is
++  // important because we don't want single-spa to proceed with mounting any subsequent Blazor
++  // micro-frontends, which could potentially cause issues when the global Blazor state for that
++  // micro-frontend is set/restored. Otherwise, it's possible for the first micro-frontend to call
++  // into the second micron-frontend's .NET runtime during component disposal, which would be a
++  // runtime error.
++  ensureRazorComponentsDisposed?: () => Promise<unknown>;
 +
-+  // B.W.S:
++  // B.W.S: This is intended to be called when a Blazor micro-frontend is unmounted from the page by
++  // single-spa. This is to ensure that any DOM listeners that Blazor has added are removed so that
++  // they will not interfere with, e.g., client-side routing of any micro-frontends that are
++  // subsequently mounted on the page.
 +  ensureDomListenersRemoved?: () => void;
 +
    _internal: {
@@ -311,19 +327,47 @@ index 1a0af87a0e..f472b37731 100644
     * Allows to override .NET runtime configuration.
     */
 diff --git a/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts b/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
-index 7496dd5522..cb3b497d32 100644
+index 7496dd5522..30c0455266 100644
 --- a/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
 +++ b/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
-@@ -5,7 +5,7 @@ import { RenderBatch, ArrayBuilderSegment, RenderTreeEdit, RenderTreeFrame, Edit
+@@ -5,7 +5,8 @@ import { RenderBatch, ArrayBuilderSegment, RenderTreeEdit, RenderTreeFrame, Edit
  import { EventDelegator } from './Events/EventDelegator';
  import { LogicalElement, PermutationListEntry, toLogicalElement, insertLogicalChild, removeLogicalChild, getLogicalParent, getLogicalChild, createAndInsertLogicalContainer, isSvgElement, permuteLogicalChildren, getClosestDomElement, emptyLogicalElement, getLogicalChildrenArray } from './LogicalElements';
  import { applyCaptureIdToElement } from './ElementReferenceCapture';
 -import { attachToEventDelegator as attachNavigationManagerToEventDelegator } from '../Services/NavigationManager';
++// B.W.S: Import functions needed for detaching the navigation manager from the event delegator.
 +import { attachToEventDelegator as attachNavigationManagerToEventDelegator, detachFromEventDelegator as detachNavigationManagerFromEventDelegator } from '../Services/NavigationManager';
  import { applyAnyDeferredValue, tryApplySpecialProperty } from './DomSpecialPropertyUtil';
  const sharedTemplateElemForParsing = document.createElement('template');
  const sharedSvgElemForParsing = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-@@ -26,12 +26,32 @@ export class BrowserRenderer {
+@@ -23,15 +24,65 @@ export class BrowserRenderer {
+ 
+   private childComponentLocations: { [componentId: number]: LogicalElement } = {};
+ 
++  // B.W.S: When a Blazor micro-frontend is unmounted from the page by single-spa, it needs to be
++  // able to completely dispose of all its Razor components before potentially a different Blazor
++  // micro-frontend boots and mounts itself. This is because Blazor relies on different pieces of
++  // state that are installed on the browser's global window object. If the second Blazor
++  // micro-frontend begins to boot and overwrites some of that global state (e.g., references to the
++  // Blazor or DotNet objects), then the first Blazor micro-frontend might end up calling into the
++  // second micro-frontend's .NET runtime during component disposal. This will lead to errors and
++  // ultimately an inconsistent state that we want to avoid.
++  //
++  // The intent is that this promise will be initialized when the first component is added to this
++  // BrowserRenderer. Once all root components have been disposed and child component locations have
++  // been cleared, this promise will be resolved. Then inside the Blazor micro-frontend's unmount
++  // lifecycle hook, it can await this promise either directly or (more likely) indirectly via the
++  // ensureRazorComponentsDisposed function exposed on the Blazor object.
++  //
++  // There are potentially some edge cases where this particular implementation does not work. In
++  // particular, if there are any components that are added to this BrowserRenderer after the
++  // promise has been resolved while the Blazor micro-frontend is still awaiting it, then the
++  // micro-frontend could complete its unmount while it still had components on the page. However,
++  // it seems like in the context of a Blazor micro-frontend, this would be very peculiar behavior
++  // and likely indicate a logic bug. Thus, we don't currently try to cover this specific case.
++  private componentsDisposedPromise = Promise.resolve();
++  private resolveComponentsDisposedPromise: (() => void) | null = null;
++
    public constructor(browserRendererId: number) {
      this.eventDelegator = new EventDelegator(browserRendererId);
  
@@ -353,9 +397,69 @@ index 7496dd5522..cb3b497d32 100644
 +    detachNavigationManagerFromEventDelegator(this.eventDelegator);
 +  }
 +
++  // B.W.S: Exposes the componentsDisposedPromise to allow, e.g., ensureRazorComponentsDisposed to
++  // await it.
++  public get componentsDisposed(): Promise<void> {
++    return this.componentsDisposedPromise;
++  }
++
    public getRootComponentCount(): number {
      return this.rootComponentIds.size;
    }
+@@ -48,6 +99,34 @@ export class BrowserRenderer {
+       element = createAndInsertLogicalContainer(element, indexAfterLastChild);
+     }
+ 
++    // B.W.S: When this renderer goes from managing zero components to at least one component, we
++    // want to re-initialize our promise used for signaling when those components are disposed and
++    // no longer under this renderer's management.
++    //
++    // The renderer keeps track of the components under its management via its
++    // childComponentLocations array. The only time values are added to it are when its
++    // attachComponentToElement method is called. Generally speaking, this method appears to be
++    // called in two main scenarios:
++    //
++    // 1. When this renderer attaches a root component to a logical element.
++    // 2. When this renderer inserts a component into another component already under its management
++    //    during a render update.
++    //
++    // The second scenario is not an appropriate time to re-initialize the promise, because the
++    // component being updated is already under the management of this renderer. Thus, we only want
++    // to re-initialize the promise when we go from zero to one root components, which is only
++    // possible here.
++    //
++    // NOTE: There is intentional asymmetry when determining when to resolve this promise. Blazor
++    // will call BrowserRenderer.disposeComponent first on the root component before calling it on
++    // any of the root component's children. Thus, when we determine when to resolve this promise,
++    // we look at the actual number of entries in childComponentLocations.
++    if (this.getRootComponentCount() === 0) {
++      this.componentsDisposedPromise = new Promise(resolve => {
++        this.resolveComponentsDisposedPromise = resolve;
++      });
++    }
++
+     markAsInteractiveRootComponentElement(element, true);
+     this.attachComponentToElement(componentId, element);
+     this.rootComponentIds.add(componentId);
+@@ -99,6 +178,18 @@ export class BrowserRenderer {
+     }
+ 
+     delete this.childComponentLocations[componentId];
++
++    // B.W.S: When this renderer goes from managing at least one component to zero components, we
++    // want to resolve our promise used for signaling when those components are disposed and no
++    // longer under this renderer's management.
++    //
++    // NOTE: There is intentional asymmetry when determining when to resolve this promise. Blazor
++    // will call BrowserRenderer.disposeComponent first on the root component before calling it on
++    // any of the root component's children. Thus, when we determine when to resolve this promise,
++    // we look at the actual number of entries in childComponentLocations.
++    if (Object.keys(this.childComponentLocations).length === 0) {
++      this.resolveComponentsDisposedPromise?.();
++    }
+   }
+ 
+   public disposeEventHandler(eventHandlerId: number): void {
 diff --git a/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts b/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts
 index 064b6e5ff3..b8c7521de4 100644
 --- a/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts
