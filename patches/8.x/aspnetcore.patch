@@ -1,0 +1,912 @@
+diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts b/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts
+index f6d3824f32..6946d9d093 100644
+--- a/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts
++++ b/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts
+@@ -18,6 +18,10 @@ import { MonoConfig } from 'dotnet';
+ import { RootComponentManager } from './Services/RootComponentManager';
+ import { WebRendererId } from './Rendering/WebRendererId';
+ 
++// B.W.S: Import the function used to configure the navigation base URL used by the Blazor
++// Navigation Manager.
++import { setNavigationBaseUrl } from './Services/NavigationUtils';
++
+ let options: Partial<WebAssemblyStartOptions> | undefined;
+ let initializersPromise: Promise<void>;
+ let platformLoadPromise: Promise<void> | undefined;
+@@ -69,6 +73,14 @@ export function setWebAssemblyOptions(initializersReady: Promise<Partial<WebAsse
+   }
+ }
+ 
++// B.W.S: Add a getter for the WebAssembly options. There were a handful of places where obtaining
++// the options was necessary, and in some instances it was not possible to simply have the caller
++// pass them in. This will always ensure the returned value is a valid object, so there is no need
++// to do things like finalOptions = options ?? {}.
++export function getWebAssemblyOptions(): Partial<WebAssemblyStartOptions> {
++  return options ?? {};
++}
++
+ export function startWebAssembly(components: RootComponentManager<WebAssemblyComponentDescriptor>): Promise<void> {
+   if (startPromise !== undefined) {
+     throw new Error('Blazor WebAssembly has already started.');
+@@ -128,25 +140,9 @@ async function startCore(components: RootComponentManager<WebAssemblyComponentDe
+     }
+   };
+ 
+-  Blazor._internal.navigationManager.listenForNavigationEvents(WebRendererId.WebAssembly, async (uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
+-    await dispatcher.invokeDotNetStaticMethodAsync(
+-      'Microsoft.AspNetCore.Components.WebAssembly',
+-      'NotifyLocationChanged',
+-      uri,
+-      state,
+-      intercepted
+-    );
+-  }, async (callId: number, uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
+-    const shouldContinueNavigation = await dispatcher.invokeDotNetStaticMethodAsync<boolean>(
+-      'Microsoft.AspNetCore.Components.WebAssembly',
+-      'NotifyLocationChangingAsync',
+-      uri,
+-      state,
+-      intercepted
+-    );
+-
+-    Blazor._internal.navigationManager.endLocationChanging(callId, shouldContinueNavigation);
+-  });
++  // B.W.S: The original direct call to the navigation manager's listenForNavigationEvents function
++  // is now factored to the addNavigationEventListeners function that is called here.
++  addWebAssemblyNavigationEventListeners();
+ 
+   // Leverage the time while we are loading boot.config.json from the network to discover any potentially registered component on
+   // the document.
+@@ -207,7 +203,15 @@ export function waitForBootConfigLoaded(): Promise<MonoConfig> {
+ export function loadWebAssemblyPlatformIfNotStarted(): Promise<void> {
+   platformLoadPromise ??= (async () => {
+     await initializersPromise;
+-    const finalOptions = options ?? {};
++
++    // B.W.S: Configure the navigation base URL used by the Blazor Navigation Manager prior to
++    // starting the Blazor application.
++    //
++    // NOTE: We have to do it after initializersPromise resolves so that our options containing the
++    // navigation base URL are fully set.
++    const finalOptions = getWebAssemblyOptions();
++    setNavigationBaseUrl(finalOptions?.navigationBaseUrl ?? new URL(document.baseURI));
++
+     const existingConfig = options?.configureRuntime;
+     finalOptions.configureRuntime = (config) => {
+       existingConfig?.(config);
+@@ -229,6 +233,36 @@ export function hasLoadedWebAssemblyPlatform(): boolean {
+   return loadedWebAssemblyPlatform;
+ }
+ 
++// B.W.S: This adds the navigation event listeners used by the Blazor WebAssembly renderer. In the
++// original code, the call to listenForNavigationEvents was done directly in the startCore function,
++// but it was moved here to make it possible for this function to be called from the mount lifecycle
++// hook of a Blazor micro-frontend when single-spa remounts it to the page.
++export function addWebAssemblyNavigationEventListeners() {
++  Blazor._internal.navigationManager.listenForNavigationEvents(
++    WebRendererId.WebAssembly,
++    async (uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
++      await dispatcher.invokeDotNetStaticMethodAsync(
++        'Microsoft.AspNetCore.Components.WebAssembly',
++        'NotifyLocationChanged',
++        uri,
++        state,
++        intercepted
++      );
++    },
++    async (callId: number, uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
++      const shouldContinueNavigation = await dispatcher.invokeDotNetStaticMethodAsync<boolean>(
++        'Microsoft.AspNetCore.Components.WebAssembly',
++        'NotifyLocationChangingAsync',
++        uri,
++        state,
++        intercepted
++      );
++
++      Blazor._internal.navigationManager.endLocationChanging(callId, shouldContinueNavigation);
++    }
++  );
++}
++
+ // obsolete, legacy, don't use for new code!
+ function invokeJSFromDotNet(callInfo: Pointer, arg0: any, arg1: any, arg2: any): any {
+   const functionIdentifier = monoPlatform.readStringField(callInfo, 0)!;
+diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.ts b/src/Components/Web.JS/src/Boot.WebAssembly.ts
+index bd8e556096..ba2cb65df1 100644
+--- a/src/Components/Web.JS/src/Boot.WebAssembly.ts
++++ b/src/Components/Web.JS/src/Boot.WebAssembly.ts
+@@ -6,13 +6,24 @@ import { Blazor } from './GlobalExports';
+ import { Module } from './Platform/Mono/MonoPlatform';
+ import { shouldAutoStart } from './BootCommon';
+ import { WebAssemblyStartOptions } from './Platform/WebAssemblyStartOptions';
+-import { setWebAssemblyOptions, startWebAssembly } from './Boot.WebAssembly.Common';
++// B.W.S: Import function used for adding navigation event listeners specifically for the
++// WebAssembly renderer.
++import { addWebAssemblyNavigationEventListeners, setWebAssemblyOptions, startWebAssembly } from './Boot.WebAssembly.Common';
+ import { WebAssemblyComponentDescriptor, discoverComponents } from './Services/ComponentDescriptorDiscovery';
+ import { DotNet } from '@microsoft/dotnet-js-interop';
+ import { InitialRootComponentsList } from './Services/InitialRootComponentsList';
+ import { JSEventRegistry } from './Services/JSEventRegistry';
++// B.W.S: Need to import some functions used for ensuring listeners are ready, DOM is restored, etc.
++import { attachDebuggerHotkey, detachDebuggerHotKey } from './Platform/Mono/MonoDebugger';
++import { removeNavigationEventListeners } from './Services/NavigationManager';
++import { getRenderers } from './Rendering/Renderer';
++import { WebRendererId } from './Rendering/WebRendererId';
+ 
+ let started = false;
++// B.W.S: Used to keep track of whether Blazor's DOM listeners are ready. This helps ensure we don't
++// try to re-add any listeners in case the Blazor micro-frontend calls ensureDomListenersReady
++// either back-to-back or immediately after the initial boot of Blazor.
++let domListenersReady = false;
+ 
+ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
+   if (started) {
+@@ -20,15 +31,69 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
+   }
+   started = true;
+ 
+-  setWebAssemblyOptions(Promise.resolve(options || {}));
++  // B.W.S: Ensure navigation and asset base URLs default to the current page's base URL to preserve
++  // as much as possible Blazor's default behavior. Also, set the base URL Microsoft.JSInterop.JS
++  // will use when resolving relative or absolute URL paths to dynamically imported JavaScript
++  // modules so that any dynamic imports triggered by the Blazor application starting can properly
++  // locate their resources.
++  options ??= {};
++  options.assetBaseUrl ??= new URL(document.baseURI);
++  options.navigationBaseUrl ??= new URL(document.baseURI);
++  DotNet.setImportBaseUrl(options.assetBaseUrl);
++  setWebAssemblyOptions(Promise.resolve(options));
+ 
+   JSEventRegistry.create(Blazor);
+   const webAssemblyComponents = discoverComponents(document, 'webassembly') as WebAssemblyComponentDescriptor[];
+   const components = new InitialRootComponentsList(webAssemblyComponents);
+   await startWebAssembly(components);
++  // B.W.S: On boot, Blazor will ensure its DOM listeners (specifically those used for handling
++  // navigation events) are ready to go. We keep track of the ready state here so that we don't
++  // try to re-add any listeners in case the Blazor micro-frontend calls ensureDomListenersReady
++  // immediately after the initial boot.
++  domListenersReady = true;
++}
++
++// B.W.S: See updates to IBlazor for detailed explanation.
++function ensureDomListenersReady() {
++  if (domListenersReady) {
++    return;
++  }
++
++  attachDebuggerHotkey(Blazor.runtime.getConfig());
++
++  const renderers = getRenderers();
++  for (const renderer of renderers) {
++    renderer.attachNavigationManager();
++  }
++
++  addWebAssemblyNavigationEventListeners();
++  domListenersReady = true;
++}
++
++// B.W.S: See updates to IBlazor for detailed explanation.
++function ensureRazorComponentsDisposed() {
++  const renderers = getRenderers();
++  return Promise.all(renderers.map(renderer => renderer.componentsDisposed));
++}
++
++// B.W.S: See updates to IBlazor for detailed explanation.
++function ensureDomListenersRemoved() {
++  detachDebuggerHotKey();
++
++  const renderers = getRenderers();
++  for (const renderer of renderers) {
++    renderer.detachNavigationManager();
++  }
++
++  removeNavigationEventListeners(WebRendererId.WebAssembly);
++  domListenersReady = false;
+ }
+ 
+ Blazor.start = boot;
++// B.W.S: Install additional APIs exposed by Blazor.WebAssembly.SingleSpa.
++Blazor.ensureDomListenersReady = ensureDomListenersReady;
++Blazor.ensureRazorComponentsDisposed = ensureRazorComponentsDisposed;
++Blazor.ensureDomListenersRemoved = ensureDomListenersRemoved;
+ window['DotNet'] = DotNet;
+ 
+ if (shouldAutoStart()) {
+diff --git a/src/Components/Web.JS/src/GlobalExports.ts b/src/Components/Web.JS/src/GlobalExports.ts
+index 4af7b56fbf..a2728c2d67 100644
+--- a/src/Components/Web.JS/src/GlobalExports.ts
++++ b/src/Components/Web.JS/src/GlobalExports.ts
+@@ -44,6 +44,28 @@ export interface IBlazor {
+   rootComponents: typeof RootComponentsFunctions;
+   runtime: RuntimeAPI,
+ 
++  // B.W.S: This is intended to be called when a Blazor micro-frontend is mounted on the page by
++  // single-spa. This is to ensure that any DOM listeners Blazor depends on for client-side
++  // navigation are added to the appropriate DOM elements before allowing the micro-frontend to
++  // complete its mount lifecycle event.
++  ensureDomListenersReady?: () => void;
++
++  // B.W.S: This is intended to be called and awaited when a Blazor micro-frontend is unmounted from
++  // the page by single-spa. This is to ensure that the Razor components have had a chance to
++  // dispose themselves before the micro-frontend completes its unmount lifecycle hook. This is
++  // important because we don't want single-spa to proceed with mounting any subsequent Blazor
++  // micro-frontends, which could potentially cause issues when the global Blazor state for that
++  // micro-frontend is set/restored. Otherwise, it's possible for the first micro-frontend to call
++  // into the second micron-frontend's .NET runtime during component disposal, which would be a
++  // runtime error.
++  ensureRazorComponentsDisposed?: () => Promise<unknown>;
++
++  // B.W.S: This is intended to be called when a Blazor micro-frontend is unmounted from the page by
++  // single-spa. This is to ensure that any DOM listeners that Blazor has added are removed so that
++  // they will not interfere with, e.g., client-side routing of any micro-frontends that are
++  // subsequently mounted on the page.
++  ensureDomListenersRemoved?: () => void;
++
+   _internal: {
+     navigationManager: typeof navigationManagerInternalFunctions | any;
+     domWrapper: typeof domFunctions;
+diff --git a/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts b/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts
+index ff5bc46426..0e843fea65 100644
+--- a/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts
++++ b/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts
+@@ -21,7 +21,9 @@ export async function fetchAndInvokeInitializers(options: Partial<WebAssemblySta
+       WebRendererId.WebAssembly
+     );
+     const initializers = Object.keys((loadedConfig?.resources?.['libraryInitializers']) || {});
+-    await jsInitializer.importInitializersAsync(initializers, initializerArguments);
++    // B.W.S: Pass down the asset base URL to the initializer so that it can resolve relative and
++    // absolute URL paths to the initializer's module.
++    await jsInitializer.importInitializersAsync(initializers, initializerArguments, options.assetBaseUrl);
+     return jsInitializer;
+   }
+ }
+diff --git a/src/Components/Web.JS/src/JSInitializers/JSInitializers.ts b/src/Components/Web.JS/src/JSInitializers/JSInitializers.ts
+index 9b0089c2e7..37f63b25a3 100644
+--- a/src/Components/Web.JS/src/JSInitializers/JSInitializers.ts
++++ b/src/Components/Web.JS/src/JSInitializers/JSInitializers.ts
+@@ -38,14 +38,29 @@ export class JSInitializer {
+     }
+   }
+ 
+-  async importInitializersAsync(initializerFiles: string[], initializerArguments: unknown[]): Promise<void> {
++  async importInitializersAsync(initializerFiles: string[], initializerArguments: unknown[], assetBaseUrl?: URL): Promise<void> {
+     // This code is not called on WASM, because library intializers are imported by runtime.
+ 
++    // B.W.S: Similar to all other assets loaded by a Blazor micro-frontend, the JavaScript
++    // initializer may be hosted at a different URL than the page's base URL. Thus, we need to allow
++    // for the absolute and relative paths to the initializer's module to be resolved against a
++    // custom asset base URL if one is provided.
++    //
++    // NOTE: Even though the original comment above says this code is not called in the WASM case,
++    // it looks like this code is executed by the other variants of Blazor (Blazor Web App, Blazor
++    // Server, etc.). Looking to the future, it's possible the changes provided by B.W.S. can also
++    // be applied to at least the Blazor Web App case when the interactive client render mode is
++    // enabled. To prepare for that, we proactively ensure our custom asset base URL is applied here
++    // and fallback to the document's base URL if one is not provided in order to preserve Blazor's
++    // original behavior.
++    const initializerBaseUrl = (assetBaseUrl ?? new URL(document.baseURI)).toString();
++
+     await Promise.all(initializerFiles.map(f => importAndInvokeInitializer(this, f)));
+ 
+     function adjustPath(path: string): string {
+       // This is the same we do in JS interop with the import callback
+-      const base = document.baseURI;
++      // B.W.S: Apply the base URL computed above to use when importing the initializer's module.
++      const base = initializerBaseUrl;
+       path = base.endsWith('/') ? `${base}${path}` : `${base}/${path}`;
+       return path;
+     }
+diff --git a/src/Components/Web.JS/src/Platform/Mono/MonoDebugger.ts b/src/Components/Web.JS/src/Platform/Mono/MonoDebugger.ts
+index 1c67981933..7bc80b40f9 100644
+--- a/src/Components/Web.JS/src/Platform/Mono/MonoDebugger.ts
++++ b/src/Components/Web.JS/src/Platform/Mono/MonoDebugger.ts
+@@ -2,6 +2,8 @@
+ // The .NET Foundation licenses this file to you under the MIT license.
+ 
+ import { MonoConfig } from 'dotnet';
++// B.W.S: Import the function used for getting the configured WebAssembly options.
++import { getWebAssemblyOptions } from '../../Boot.WebAssembly.Common';
+ 
+ const navigatorUA = navigator as MonoNavigatorUserAgent;
+ const brands = navigatorUA.userAgentData && navigatorUA.userAgentData.brands;
+@@ -11,42 +13,80 @@ const currentBrowserIsChromeOrEdge = brands && brands.length > 0
+   : (window as any).chrome;
+ const platform = navigatorUA.userAgentData?.platform ?? navigator.platform;
+ 
++// B.W.S: Store a reference to the keydown event listener that starts the debugger so that it can be
++// removed later by detachDebuggerHotKey.
++let startDebuggerCallback: ((evt: KeyboardEvent) => void) | null = null;
++
+ function hasDebuggingEnabled(config: MonoConfig): boolean {
+   return config.debugLevel !== 0 && (currentBrowserIsChromeOrEdge || navigator.userAgent.includes('Firefox'));
+ }
+ 
+ export function attachDebuggerHotkey(config: MonoConfig): void {
+-  // Use the combination shift+alt+D because it isn't used by the major browsers
+-  // for anything else by default
+-  const altKeyName = platform.match(/^Mac/i) ? 'Cmd' : 'Alt';
+-  if (hasDebuggingEnabled(config)) {
+-    console.info(`Debugging hotkey: Shift+${altKeyName}+D (when application has focus)`);
++  // B.W.S: We only create and add a new listener if one isn't already present to avoid having to
++  // deal multiple listeners trying to start the debugger simultaneously.
++  if (!startDebuggerCallback) {
++    // Use the combination shift+alt+D because it isn't used by the major browsers
++    // for anything else by default
++    const altKeyName = platform.match(/^Mac/i) ? 'Cmd' : 'Alt';
++    if (hasDebuggingEnabled(config)) {
++      console.info(`Debugging hotkey: Shift+${altKeyName}+D (when application has focus)`);
++    }
++
++    // Even if debugging isn't enabled, we register the hotkey so we can report why it's not enabled
++    startDebuggerCallback = buildStartDebuggerCallback(config);
++    document.addEventListener('keydown', startDebuggerCallback);
++  }
++}
++
++// B.W.S: This is essentially the inverse of attachDebuggerHotKey. It is intended to be called from
++// ensureDomListenersRemoved.
++export function detachDebuggerHotKey() {
++  if (startDebuggerCallback) {
++    document.removeEventListener('keydown', startDebuggerCallback);
++    startDebuggerCallback = null;
+   }
++}
++
++// B.W.S: We need to be able to remove the key listener added by attachDebuggerHotKey. However, the
++// listener also depends on being able to access the MonoConfig and asset base URL. Thus, the actual
++// event listener is built as a separate function that closes over the config and asset base URL and
++// is returned to the caller.
++function buildStartDebuggerCallback(config: MonoConfig) {
++  // B.W.S: read the WebAssembly options so that we can get the asset base URL. If no asset base URL
++  // is available, use the page's base URL to preserve Blazor's original behavior as much as
++  // possible.
++  const webAssemblyOptions = getWebAssemblyOptions();
++  const assetBaseUrl = webAssemblyOptions.assetBaseUrl ?? new URL(document.baseURI);
+ 
+-  // Even if debugging isn't enabled, we register the hotkey so we can report why it's not enabled
+-  document.addEventListener('keydown', evt => {
++  return function startDebugger(evt: KeyboardEvent) {
+     if (evt.shiftKey && (evt.metaKey || evt.altKey) && evt.code === 'KeyD') {
+       if (!hasDebuggingEnabled(config)) {
+         console.error('Cannot start debugging, because the application was not compiled with debugging enabled.');
+       } else if (navigator.userAgent.includes('Firefox')) {
+-        launchFirefoxDebugger();
++        // B.W.S: Pass in the asset base URL so we can adjust the URL to the debug endpoint.
++        launchFirefoxDebugger(assetBaseUrl);
+       } else if (!currentBrowserIsChromeOrEdge) {
+         console.error('Currently, only Microsoft Edge (80+), Google Chrome, or Chromium, are supported for debugging.');
+       } else {
+-        launchDebugger();
++        // B.W.S: Pass in the asset base URL so we can adjust the URL to the debug endpoint.
++        launchDebugger(assetBaseUrl);
+       }
+     }
+-  });
++  };
+ }
+ 
+-async function launchFirefoxDebugger() {
+-  const response = await fetch(`_framework/debug?url=${encodeURIComponent(location.href)}&isFirefox=true`);
++// B.W.S: Pass in the asset base URL so we can adjust the URL to the debug endpoint.
++async function launchFirefoxDebugger(assetBaseUrl: URL) {
++  // B.W.S: Apply the asset base URL when building the URL to the debug endpoint.
++  const debugUrl = new URL(`_framework/debug?url=${encodeURIComponent(location.href)}&isFirefox=true`, assetBaseUrl);
++  const response = await fetch(debugUrl.toString());
+   if (response.status !== 200) {
+     console.warn(await response.text());
+   }
+ }
+ 
+-function launchDebugger() {
++// B.W.S: Pass in the asset base URL so we can adjust the URL to the debug endpoint.
++function launchDebugger(assetBaseUrl: URL) {
+   // The noopener flag is essential, because otherwise Chrome tracks the association with the
+   // parent tab, and then when the parent tab pauses in the debugger, the child tab does so
+   // too (even if it's since navigated to a different page). This means that the debugger
+@@ -55,7 +95,8 @@ function launchDebugger() {
+   // We have to construct a link element and simulate a click on it, because the more obvious
+   // window.open(..., 'noopener') always opens a new window instead of a new tab.
+   const link = document.createElement('a');
+-  link.href = `_framework/debug?url=${encodeURIComponent(location.href)}`;
++  // B.W.S: Apply the asset base URL when building the URL to the debug endpoint.
++  link.href = new URL(`_framework/debug?url=${encodeURIComponent(location.href)}`, assetBaseUrl).toString();
+   link.target = '_blank';
+   link.rel = 'noopener noreferrer';
+   link.click();
+diff --git a/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts b/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
+index 6bf151259e..a58298432f 100644
+--- a/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
++++ b/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
+@@ -179,7 +179,12 @@ async function importDotnetJs(startOptions: Partial<WebAssemblyStartOptions>): P
+     }
+   }
+ 
+-  const absoluteSrc = (new URL(src, document.baseURI)).toString();
++  // B.W.S: For a Blazor micro-frontend, we would typically expect the URL to the dotnet.js be
++  // provided by a custom boot resource loader. However, in case one was no provided, then we would
++  // expect the script to be available from the asset base URL. We default to the page's base URL in
++  // order to preserve Blazor's default behavior as much as possible.
++  const baseUrl = startOptions.assetBaseUrl ?? new URL(document.baseURI);
++  const absoluteSrc = (new URL(src, baseUrl)).toString();
+   return await import(/* webpackIgnore: true */ absoluteSrc);
+ }
+ 
+diff --git a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts b/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
+index 1a0af87a0e..f472b37731 100644
+--- a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
++++ b/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
+@@ -30,6 +30,58 @@ export interface WebAssemblyStartOptions {
+ 
+   initializers?: WebAssemblyInitializers;
+ 
++  /**
++   * B.W.S: Base URL that will be used when resolving both relative URL paths and absolute URL
++   * paths to assets loaded by either Blazor or the .NET browser (WASM) runtime. These assets are
++   * typically things like assemblies, runtime configuration files, and globalization data. It also
++   * includes any JavaScript modules dynamically imported by Blazor via Microsoft.JSInterop.JS;
++   * however, it won't cover JS modules dynamically imported via .NET browser runtime. It hasn't
++   * been verified yet, but it appears that the .NET browser runtime will give a custom resource
++   * loader the chance to resolve an alternate URL for those assets. If that's the case, then the
++   * custom resource loader could apply the asset base URL to resolve those URLs.
++   *
++   * If this is not provided, then this will default to document.baseURI, which is what Blazor and
++   * the .NET browser runtime either directly use or implicitly assume when resolving relative and
++   * absolute path URLs to assets. Ig given, this must end in a trailing slash.
++   *
++   * Rationale: Different micro-frontends, whether implemented by Blazor or not, will typically be
++   * hosted at different URLs that don't necessarily (and most likely won't) match the page's base
++   * URL. Thus, when a Blazor micro-frontend's assets are fetched or its modules dynamically
++   * imported by relative or absolute URL paths, we need to ensure that those assets are ultimately
++   * retrieved from the proper location.
++   *
++   * NOTE: There appear to be some cases in the .NET browser runtime where an asset will be
++   * retrieved using a custom fetch_like function. Internally, it appears this function will use the
++   * global fetch function, but it will specifically set its credentials option to 'same-origin'.
++   * The running theory is that if this is true and if the assets retrieved using this fetch_like
++   * are processed by a custom resource loader that returned an alternate URL, then the loader would
++   * need to possibly ensure the alternate URL is at the same origin as the page if it required
++   * credentials (e.g., cookies) to be sent with the request. Furthermore, it may be possible that
++   * some of those assets, when loaded by a custom resource loader, must resolve to URL strings as
++   * opposed to, e.g., Response objects wrapped in a Promise. If this turns out to be true, then it
++   * would mean that the asset base URL and any custom resource loader must resolve URLs that are
++   * hosted at the same origin as the page.
++   */
++  assetBaseUrl?: URL;
++
++  /**
++   * B.W.S: Base URL the Blazor navigation manager will use internal routing decisions. If not
++   * given, defaults to document.baseURI, which is what Blazor uses directly by default. If given,
++   * this must end in a trailing slash.
++   *
++   * Rationale: Different Blazor micro-frontends managed by single-spa will live at different
++   * client-side routes, e.g., https://example.com/blazor-foo/ and https://example.com/blazor-bar/.
++   * The page's base URL (given by document.baseURI) will typically be simply https://example.com/
++   * (if it is explicitly set by the page's HTML) or will be inferred from the page's current
++   * location. Neither or these will be suitable for both Blazor micro-frontends when their
++   * respective navigation managers attempt to determine 1) if a particular navigation to a new URL
++   * should be considered internal to the Blazor application or external and 2) what the new URL
++   * should be in the case of an internal navigation. Providing a navigation base URL allows the
++   * app developer to specify an appropriate URL that the Blazor navigation manager can use when
++   * making its internal routing decisions.
++   */
++  navigationBaseUrl?: URL;
++
+   /**
+    * Allows to override .NET runtime configuration.
+    */
+diff --git a/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts b/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
+index 7496dd5522..30c0455266 100644
+--- a/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
++++ b/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
+@@ -5,7 +5,8 @@ import { RenderBatch, ArrayBuilderSegment, RenderTreeEdit, RenderTreeFrame, Edit
+ import { EventDelegator } from './Events/EventDelegator';
+ import { LogicalElement, PermutationListEntry, toLogicalElement, insertLogicalChild, removeLogicalChild, getLogicalParent, getLogicalChild, createAndInsertLogicalContainer, isSvgElement, permuteLogicalChildren, getClosestDomElement, emptyLogicalElement, getLogicalChildrenArray } from './LogicalElements';
+ import { applyCaptureIdToElement } from './ElementReferenceCapture';
+-import { attachToEventDelegator as attachNavigationManagerToEventDelegator } from '../Services/NavigationManager';
++// B.W.S: Import functions needed for detaching the navigation manager from the event delegator.
++import { attachToEventDelegator as attachNavigationManagerToEventDelegator, detachFromEventDelegator as detachNavigationManagerFromEventDelegator } from '../Services/NavigationManager';
+ import { applyAnyDeferredValue, tryApplySpecialProperty } from './DomSpecialPropertyUtil';
+ const sharedTemplateElemForParsing = document.createElement('template');
+ const sharedSvgElemForParsing = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+@@ -23,15 +24,65 @@ export class BrowserRenderer {
+ 
+   private childComponentLocations: { [componentId: number]: LogicalElement } = {};
+ 
++  // B.W.S: When a Blazor micro-frontend is unmounted from the page by single-spa, it needs to be
++  // able to completely dispose of all its Razor components before potentially a different Blazor
++  // micro-frontend boots and mounts itself. This is because Blazor relies on different pieces of
++  // state that are installed on the browser's global window object. If the second Blazor
++  // micro-frontend begins to boot and overwrites some of that global state (e.g., references to the
++  // Blazor or DotNet objects), then the first Blazor micro-frontend might end up calling into the
++  // second micro-frontend's .NET runtime during component disposal. This will lead to errors and
++  // ultimately an inconsistent state that we want to avoid.
++  //
++  // The intent is that this promise will be initialized when the first component is added to this
++  // BrowserRenderer. Once all root components have been disposed and child component locations have
++  // been cleared, this promise will be resolved. Then inside the Blazor micro-frontend's unmount
++  // lifecycle hook, it can await this promise either directly or (more likely) indirectly via the
++  // ensureRazorComponentsDisposed function exposed on the Blazor object.
++  //
++  // There are potentially some edge cases where this particular implementation does not work. In
++  // particular, if there are any components that are added to this BrowserRenderer after the
++  // promise has been resolved while the Blazor micro-frontend is still awaiting it, then the
++  // micro-frontend could complete its unmount while it still had components on the page. However,
++  // it seems like in the context of a Blazor micro-frontend, this would be very peculiar behavior
++  // and likely indicate a logic bug. Thus, we don't currently try to cover this specific case.
++  private componentsDisposedPromise = Promise.resolve();
++  private resolveComponentsDisposedPromise: (() => void) | null = null;
++
+   public constructor(browserRendererId: number) {
+     this.eventDelegator = new EventDelegator(browserRendererId);
+ 
++    // B.W.S: The original implementation directly called attachNavigationManagerToEventDelegator.
++    // This is now factored to a separate method that is called here. This allows the navigation
++    // manager to be reattached when a Blazor micro-frontend is remounted to the page by single-spa.
++    this.attachNavigationManager();
++  }
++
++  // B.W.S: This method allows a Blazor micro-frontend to reattach the navigation manager to the
++  // renderer's event delegator when the Blazor application is remounted to the page by single-spa.
++  // This will automatically be called when Blazor is first started, specifically when the
++  // BrowserRenderer is first created. Thus, a Blazor micro-frontend should NOT call this method
++  // directly on its first mount. On all subsequent mounts, the micro-frontend should ensure this
++  // method is called, typically via the ensureDomListenersReady function on the Blazor object.
++  public attachNavigationManager(): void {
+     // We don't yet know whether or not navigation interception will be enabled, but in case it will be,
+     // we wire up the navigation manager to the event delegator so it has the option to participate
+     // in the synthetic event bubbling process later
+     attachNavigationManagerToEventDelegator(this.eventDelegator);
+   }
+ 
++  // B.W.S: The inverse of detachNavigationManager. This is intended to be called when a Blazor
++  // micro-frontend is unmounted from the page by single-spa. The micro-frontend typically ensures
++  // this via the ensureDomListenersRemoved function on the Blazor object.
++  public detachNavigationManager(): void {
++    detachNavigationManagerFromEventDelegator(this.eventDelegator);
++  }
++
++  // B.W.S: Exposes the componentsDisposedPromise to allow, e.g., ensureRazorComponentsDisposed to
++  // await it.
++  public get componentsDisposed(): Promise<void> {
++    return this.componentsDisposedPromise;
++  }
++
+   public getRootComponentCount(): number {
+     return this.rootComponentIds.size;
+   }
+@@ -48,6 +99,34 @@ export class BrowserRenderer {
+       element = createAndInsertLogicalContainer(element, indexAfterLastChild);
+     }
+ 
++    // B.W.S: When this renderer goes from managing zero components to at least one component, we
++    // want to re-initialize our promise used for signaling when those components are disposed and
++    // no longer under this renderer's management.
++    //
++    // The renderer keeps track of the components under its management via its
++    // childComponentLocations array. The only time values are added to it are when its
++    // attachComponentToElement method is called. Generally speaking, this method appears to be
++    // called in two main scenarios:
++    //
++    // 1. When this renderer attaches a root component to a logical element.
++    // 2. When this renderer inserts a component into another component already under its management
++    //    during a render update.
++    //
++    // The second scenario is not an appropriate time to re-initialize the promise, because the
++    // component being updated is already under the management of this renderer. Thus, we only want
++    // to re-initialize the promise when we go from zero to one root components, which is only
++    // possible here.
++    //
++    // NOTE: There is intentional asymmetry when determining when to resolve this promise. Blazor
++    // will call BrowserRenderer.disposeComponent first on the root component before calling it on
++    // any of the root component's children. Thus, when we determine when to resolve this promise,
++    // we look at the actual number of entries in childComponentLocations.
++    if (this.getRootComponentCount() === 0) {
++      this.componentsDisposedPromise = new Promise(resolve => {
++        this.resolveComponentsDisposedPromise = resolve;
++      });
++    }
++
+     markAsInteractiveRootComponentElement(element, true);
+     this.attachComponentToElement(componentId, element);
+     this.rootComponentIds.add(componentId);
+@@ -99,6 +178,18 @@ export class BrowserRenderer {
+     }
+ 
+     delete this.childComponentLocations[componentId];
++
++    // B.W.S: When this renderer goes from managing at least one component to zero components, we
++    // want to resolve our promise used for signaling when those components are disposed and no
++    // longer under this renderer's management.
++    //
++    // NOTE: There is intentional asymmetry when determining when to resolve this promise. Blazor
++    // will call BrowserRenderer.disposeComponent first on the root component before calling it on
++    // any of the root component's children. Thus, when we determine when to resolve this promise,
++    // we look at the actual number of entries in childComponentLocations.
++    if (Object.keys(this.childComponentLocations).length === 0) {
++      this.resolveComponentsDisposedPromise?.();
++    }
+   }
+ 
+   public disposeEventHandler(eventHandlerId: number): void {
+diff --git a/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts b/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts
+index 064b6e5ff3..b8c7521de4 100644
+--- a/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts
++++ b/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts
+@@ -121,6 +121,16 @@ export class EventDelegator {
+     this.eventInfoStore.addGlobalListener('click'); // Ensure we always listen for this
+   }
+ 
++  // B.W.S: The inverse of notifyAfterClick. This is called by detachFromEventDelegator, which is
++  // expected to occur when a Blazor micro-frontend is unmounted from the page by single-spa.
++  public removeAfterClickCallback(callback: (event: MouseEvent) => void): void {
++    this.eventInfoStore.removeGlobalListener('click');
++    const index = this.afterClickCallbacks.indexOf(callback);
++    if (index !== -1) {
++      this.afterClickCallbacks.splice(index, 1);
++    }
++  }
++
+   public setStopPropagation(element: Element, eventName: string, value: boolean): void {
+     const infoForElement = this.getEventHandlerInfosForElement(element, true)!;
+     infoForElement.stopPropagation(eventName, value);
+@@ -261,6 +271,19 @@ class EventInfoStore {
+     }
+   }
+ 
++  // B.W.S: The inverse of addGlobalListener. This is called by the EventDelegator when an
++  // after-click callback is removed from it. This is expected to occur when a Blazor micro-frontend
++  // is unmounted from the page by single-spa.
++  public removeGlobalListener(eventName: string) {
++    eventName = getBrowserEventName(eventName);
++
++    if (--this.countByEventName[eventName] === 0) {
++      delete this.countByEventName[eventName];
++      const useCapture = Object.prototype.hasOwnProperty.call(nonBubblingEvents, eventName);
++      document.removeEventListener(eventName, this.globalListener, useCapture);
++    }
++  }
++
+   public update(oldEventHandlerId: number, newEventHandlerId: number) {
+     if (Object.prototype.hasOwnProperty.call(this.infosByEventHandlerId, newEventHandlerId)) {
+       // Should never happen, but we want to know if it does
+diff --git a/src/Components/Web.JS/src/Rendering/Renderer.ts b/src/Components/Web.JS/src/Rendering/Renderer.ts
+index 976e5a9c75..cdd7fc090f 100644
+--- a/src/Components/Web.JS/src/Rendering/Renderer.ts
++++ b/src/Components/Web.JS/src/Rendering/Renderer.ts
+@@ -47,6 +47,12 @@ export function attachRootComponentToElement(elementSelector: string, componentI
+   attachRootComponentToLogicalElement(browserRendererId, toLogicalElement(element, /* allow existing contents */ true), componentId, appendContent);
+ }
+ 
++// B.W.S: This is used by ensureDomListenersRemoved to detach the navigation manager from each
++// BrowserRenderer.
++export function getRenderers(): BrowserRenderer[] {
++  return Object.values(browserRenderers);
++}
++
+ export function getRendererer(browserRendererId: number): BrowserRenderer | undefined {
+   return browserRenderers[browserRendererId];
+ }
+diff --git a/src/Components/Web.JS/src/Services/NavigationManager.ts b/src/Components/Web.JS/src/Services/NavigationManager.ts
+index 7a6e0bbbbf..8ddf3a94c0 100644
+--- a/src/Components/Web.JS/src/Services/NavigationManager.ts
++++ b/src/Components/Web.JS/src/Services/NavigationManager.ts
+@@ -4,11 +4,15 @@
+ import '@microsoft/dotnet-js-interop';
+ import { resetScrollAfterNextBatch } from '../Rendering/Renderer';
+ import { EventDelegator } from '../Rendering/Events/EventDelegator';
+-import { attachEnhancedNavigationListener, getInteractiveRouterRendererId, handleClickForNavigationInterception, hasInteractiveRouter, hasProgrammaticEnhancedNavigationHandler, isWithinBaseUriSpace, performProgrammaticEnhancedNavigation, setHasInteractiveRouter, toAbsoluteUri } from './NavigationUtils';
++import { attachEnhancedNavigationListener, detachEnhancedNavigationListener, getInteractiveRouterRendererId, handleClickForNavigationInterception, hasInteractiveRouter, hasProgrammaticEnhancedNavigationHandler, isWithinBaseUriSpace, performProgrammaticEnhancedNavigation, setHasInteractiveRouter, toAbsoluteUri } from './NavigationUtils';
+ import { WebRendererId } from '../Rendering/WebRendererId';
+ import { isRendererAttached } from '../Rendering/WebRendererInteropMethods';
+ import { IBlazor } from '../GlobalExports';
+ 
++// B.W.S: Import the navigation base URL so that it can be returned by the navigation manager's
++// internal API.
++import { navigationBaseUrl } from './NavigationUtils';
++
+ let hasRegisteredNavigationEventListeners = false;
+ let currentHistoryIndex = 0;
+ let currentLocationChangingCallId = 0;
+@@ -33,7 +37,8 @@ export const internalFunctions = {
+   endLocationChanging,
+   navigateTo: navigateToFromDotNet,
+   refresh,
+-  getBaseURI: (): string => document.baseURI,
++  // B.W.S: Use the configured navigation base URL as the value reported by the navigation manager.
++  getBaseURI: (): string => navigationBaseUrl.toString(),
+   getLocationHref: (): string => location.href,
+   scrollToElement,
+ };
+@@ -63,6 +68,28 @@ function listenForNavigationEvents(
+   });
+ }
+ 
++// B.W.S: When a Blazor micro-frontend is unmounted from the page by single-spa, we need to ensure
++// that its navigation manager is no longer responding to any DOM events it cares about for
++// navigation purposes. This is essentially the inverse of listenForNavigationEvents, and it is
++// intended to be called by the Blazor micro-frontend's unmount lifecycle hook.
++export function removeNavigationEventListeners(rendererId: WebRendererId) {
++  navigationCallbacks.delete(rendererId);
++
++  // B.W.S: We only unregister the navigation event listeners if all navigation callbacks have been
++  // removed. In practice this shouldn't matter because a Blazor micro-frontend that is unmounting
++  // needs to remove all navigation event listeners for all its renderers. Thus, eventually they
++  // should all get removed before the next micro-frontend is mounted by single-spa. However, from
++  // an intent standpoint, it seems like you should only remove the listeners if there are no more
++  // navigation callbacks registered to receive notification of navigation events.
++  if (navigationCallbacks.size > 0 && !hasRegisteredNavigationEventListeners) {
++    return;
++  }
++
++  hasRegisteredNavigationEventListeners = false;
++  window.removeEventListener('popstate', onPopState);
++  detachEnhancedNavigationListener();
++}
++
+ function setHasLocationChangingListeners(rendererId: WebRendererId, hasListeners: boolean) {
+   const callbacks = navigationCallbacks.get(rendererId);
+   if (!callbacks) {
+@@ -86,14 +113,33 @@ export function attachToEventDelegator(eventDelegator: EventDelegator): void {
+   // We need to respond to clicks on <a> elements *after* the EventDelegator has finished
+   // running its simulated bubbling process so that we can respect any preventDefault requests.
+   // So instead of registering our own native event, register using the EventDelegator.
+-  eventDelegator.notifyAfterClick(event => {
+-    if (!hasInteractiveRouter()) {
+-      return;
+-    }
+ 
+-    handleClickForNavigationInterception(event, absoluteInternalHref => {
+-      performInternalNavigation(absoluteInternalHref, /* interceptedLink */ true, /* replace */ false);
+-    });
++  // B.W.S: Modified so that the callback is moved to a named function. This allows it to be later
++  // removed from the EventDelegator when a Blazor micro-frontend is unmounted from the page by
++  // single-spa.
++  eventDelegator.notifyAfterClick(afterClickCallback);
++}
++
++// B.W.S: The inverse of attachToEventDelegator. This is expected to be called by each
++// BrowserRenderer (via its detachNavigationManager method) when a Blazor micro-frontend is
++// unmounted from the page by single-spa. This is to prevent the Blazor application from attempting
++// to respond to click events when the application is not active on the page.
++export function detachFromEventDelegator(eventDelegator: EventDelegator): void {
++  eventDelegator.removeAfterClickCallback(afterClickCallback);
++}
++
++// B.W.S: The original implementation had this function defined inline to the call to the
++// notifyAfterClick method inside attachEventDelegator. Since the callback needs to be removed from
++// the EventDelegator when a Blazor micro-frontend is unmounted from the page by single-spa, the
++// callback itself needed to be defined as a named function. This allows the callback to be removed
++// from the EventDelegator's list of callbacks and its EventInfoStore.
++function afterClickCallback(event: MouseEvent): void {
++  if (!hasInteractiveRouter()) {
++    return;
++  }
++
++  handleClickForNavigationInterception(event, absoluteInternalHref => {
++    performInternalNavigation(absoluteInternalHref, /* interceptedLink */ true, /* replace */ false);
+   });
+ }
+ 
+diff --git a/src/Components/Web.JS/src/Services/NavigationUtils.ts b/src/Components/Web.JS/src/Services/NavigationUtils.ts
+index a278ac5414..6c74c3810a 100644
+--- a/src/Components/Web.JS/src/Services/NavigationUtils.ts
++++ b/src/Components/Web.JS/src/Services/NavigationUtils.ts
+@@ -7,6 +7,14 @@ let interactiveRouterRendererId: WebRendererId | undefined = undefined;
+ let programmaticEnhancedNavigationHandler: typeof performProgrammaticEnhancedNavigation | undefined;
+ let enhancedNavigationListener: typeof notifyEnhancedNavigationListners | undefined;
+ 
++// B.W.S: We store the navigation base URL here and make it available for other components, notably
++// the Blazor navigation manager, to import and use it. To preserve as much as possible Blazor's
++// default behavior, we set the navigation base URL to the current page's base URL.
++export let navigationBaseUrl: URL = new URL(document.baseURI);
++export function setNavigationBaseUrl(baseUrl: URL) {
++  navigationBaseUrl = baseUrl;
++}
++
+ /**
+  * Checks if a click event corresponds to an <a> tag referencing a URL within the base href, and that interception
+  * isn't bypassed (e.g., by a 'download' attribute or the user holding a meta key while clicking).
+@@ -40,7 +48,10 @@ export function handleClickForNavigationInterception(event: MouseEvent, callback
+ }
+ 
+ export function isWithinBaseUriSpace(href: string) {
+-  const baseUriWithoutTrailingSlash = toBaseUriWithoutTrailingSlash(document.baseURI!);
++  // B.W.S: Compute the base URL using configured navigation base URL. Original code explicitly used
++  // the page's base URL, which is what the navigation base URL will default to as a way of
++  // preserving Blazor's original behavior as much as possible.
++  const baseUriWithoutTrailingSlash = toBaseUriWithoutTrailingSlash(navigationBaseUrl.toString());
+   const nextChar = href.charAt(baseUriWithoutTrailingSlash.length);
+ 
+   return href.startsWith(baseUriWithoutTrailingSlash)
+@@ -51,6 +62,12 @@ export function attachEnhancedNavigationListener(listener: typeof enhancedNaviga
+   enhancedNavigationListener = listener;
+ }
+ 
++// B.W.S: This is a new function that allows the Blazor navigation manager to detach the enhanced
++// navigation listener whenever the navigation manager unregisters its navigation event listeners.
++export function detachEnhancedNavigationListener() {
++  enhancedNavigationListener = undefined;
++}
++
+ export function notifyEnhancedNavigationListners(internalDestinationHref: string, interceptedLink: boolean) {
+   enhancedNavigationListener?.(internalDestinationHref, interceptedLink);
+ }
+@@ -78,7 +95,15 @@ function toBaseUriWithoutTrailingSlash(baseUri: string) {
+ let testAnchor: HTMLAnchorElement;
+ export function toAbsoluteUri(relativeUri: string): string {
+   testAnchor = testAnchor || document.createElement('a');
+-  testAnchor.href = relativeUri;
++  // B.W.S: The original implementation simply set the test anchor's href attribute to the given
++  // relative URL. Doing so will cause the browser to resolve the anchor's href to the page's base
++  // URL. In the case of a Blazor micro-frontend, the page's base URL does not necessarily
++  // correspond with the navigation base URL used by the Blazor application's navigation manager.
++  // Since toAbsoluteUri is primarily used for building URLs that are then tested to determine if
++  // Blazor should perform an internal or external navigation, we always apply the navigation base
++  // URL when setting the test anchor's href. When the default navigation base URL is used, it will
++  // apply the page's base URL, which preserves as much as possible Blazor's original behavior.
++  testAnchor.href = new URL(relativeUri, navigationBaseUrl).toString();
+   return testAnchor.href;
+ }
+ 
+diff --git a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
+index 4a237e391c..402ec3b9f6 100644
+--- a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
++++ b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
+@@ -71,8 +71,38 @@ export module DotNet {
+       // In most cases developers will want to resolve dynamic imports relative to the base HREF.
+       // However since we're the one calling the import keyword, they would be resolved relative to
+       // this framework bundle URL. Fix this by providing an absolute URL.
+-      if (typeof url === "string" && url.startsWith("./")) {
+-          url = new URL(url.substr(2), document.baseURI).toString();
++      if (typeof url === "string") {
++          if (url.startsWith("./")) {
++              // B.W.S: The given URL is a relative URL path. Blazor's intent in this case is to
++              // resolve it against the apps "base HREF". The original code used document.baseURI
++              // and also had the implicit assumption that the page's base HREF ended with a
++              // trailing slash. This would ensure the URL concatenation formed the correct absolute
++              // URL when using the URL constructor.
++              //
++              // In our case, we concatenate with the importBaseUrl the app developer provides when
++              // they specify the assetBaseUrl to Blazor.start. Out of a desire to not deviate too
++              // much from the original code, we will assume that the importBaseUrl will always end
++              // with a trailing slash rather than forcing a trailing slash on the import base URL
++              // if it's missing.
++              //
++              // NOTE: The original code stripped the leading "./" from the URL. We don't do that
++              // here because it's not necessary. The URL will be resolved correctly by the URL
++              // constructor regardless of whether the leading "./" is present or not.
++              url = new URL(url, importBaseUrl).toString();
++          } else if (url.startsWith("/")) {
++              // B.W.S: The given URL is an absolute URL path. In the original code, this would have
++              // been passed directly to the dynamic import below, resulting in the import fetching
++              // the JavaScript module from the root of the page's origin itself.
++              //
++              // However, in the case of a Blazor application managed by single-spa, it's typical
++              // that the application is hosting its assets at a location that differs from the root
++              // of the page's origin. When resolving the absolute path URL, we form a URL that
++              // takes the configured import base URL and concatenates the given absolute path URL
++              // to it. Since we assume the import base URL has a trailing slash, we DO need to trim
++              // off the leading slash in order for the final absolute URL to preserve any path base
++              // the import base URL contains.
++              url = new URL(url.substring(1), importBaseUrl).toString();
++          }
+       }
+ 
+       return import(/* webpackIgnore: true */ url);
+@@ -686,4 +716,16 @@ export module DotNet {
+ 
+       return value;
+   }
++
++  // B.W.S: The importBaseUrl will be used when converting relative and absolute path URLs to
++  // absolute URLs (ones that include the scheme, host, port, and app base path etc.). These are
++  // then used when resolving dynamic imports in the import function registered for invocation from
++  // .NET code running in the browser. The original code used document.baseURI as the base URL when
++  // resolving dynamic imports, thus we choose to initialize the importBaseUrl to that value to
++  // preserve as much as possible Blazor's default behavior.
++  let importBaseUrl: URL = new URL(document.baseURI);
++
++  export function setImportBaseUrl(url: URL) {
++    importBaseUrl = url;
++  }
+ }
