@@ -112,7 +112,7 @@ index f6d3824f32..6946d9d093 100644
  function invokeJSFromDotNet(callInfo: Pointer, arg0: any, arg1: any, arg2: any): any {
    const functionIdentifier = monoPlatform.readStringField(callInfo, 0)!;
 diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.ts b/src/Components/Web.JS/src/Boot.WebAssembly.ts
-index bd8e556096..ba2cb65df1 100644
+index bd8e556096..a6558cdef0 100644
 --- a/src/Components/Web.JS/src/Boot.WebAssembly.ts
 +++ b/src/Components/Web.JS/src/Boot.WebAssembly.ts
 @@ -6,13 +6,24 @@ import { Blazor } from './GlobalExports';
@@ -141,7 +141,7 @@ index bd8e556096..ba2cb65df1 100644
  
  async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
    if (started) {
-@@ -20,15 +31,69 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
+@@ -20,15 +31,98 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
    }
    started = true;
  
@@ -202,6 +202,33 @@ index bd8e556096..ba2cb65df1 100644
 +
 +  removeNavigationEventListeners(WebRendererId.WebAssembly);
 +  domListenersReady = false;
++}
++
++// B.W.S: Blazor and the .NET browser platform will write to the global window references to a
++// number of runtime objects that are initialized as part of Blazor's startup sequence. Different
++// parts of Blazor, the .NET browser runtime, and some third-party libraries assume access to these
++// global references; however, without intervention, this prevents more a page using single-spa to
++// have more than one Blazor micro-frontend registered because each one will simply clobber the
++// others' runtime references.
++//
++// To work around this, we store these references just before Blazor's boot function returns. Then,
++// each Blazor micro-frontend should call restoreGlobalState just before it adds its Blazor
++// application to the DOM. Finally, each micro-frontend should call clearGlobalState just before it
++// returns from its unmount lifecycle hook.
++function restoreGlobalState() {
++  window['DotNet'] = DotNet;
++  window['Blazor'] = Blazor;
++  window['Module'] = Blazor.runtime.Module;
++  window['BINDING'] = Blazor.runtime.BINDING;
++  window['INTERNAL'] = Blazor.runtime.INTERNAL;
++}
++
++function clearGlobalState() {
++  delete window['DotNet'];
++  delete window['Blazor'];
++  delete window['Module'];
++  delete window['BINDING'];
++  delete window['INTERNAL'];
  }
  
  Blazor.start = boot;
@@ -209,14 +236,16 @@ index bd8e556096..ba2cb65df1 100644
 +Blazor.ensureDomListenersReady = ensureDomListenersReady;
 +Blazor.ensureRazorComponentsDisposed = ensureRazorComponentsDisposed;
 +Blazor.ensureDomListenersRemoved = ensureDomListenersRemoved;
++Blazor.restoreGlobalState = restoreGlobalState;
++Blazor.clearGlobalState = clearGlobalState;
  window['DotNet'] = DotNet;
  
  if (shouldAutoStart()) {
 diff --git a/src/Components/Web.JS/src/GlobalExports.ts b/src/Components/Web.JS/src/GlobalExports.ts
-index 4af7b56fbf..a2728c2d67 100644
+index 4af7b56fbf..5b9ce3d660 100644
 --- a/src/Components/Web.JS/src/GlobalExports.ts
 +++ b/src/Components/Web.JS/src/GlobalExports.ts
-@@ -44,6 +44,28 @@ export interface IBlazor {
+@@ -44,6 +44,38 @@ export interface IBlazor {
    rootComponents: typeof RootComponentsFunctions;
    runtime: RuntimeAPI,
  
@@ -241,6 +270,16 @@ index 4af7b56fbf..a2728c2d67 100644
 +  // they will not interfere with, e.g., client-side routing of any micro-frontends that are
 +  // subsequently mounted on the page.
 +  ensureDomListenersRemoved?: () => void;
++
++  // B.W.S: This is intended to be called when a Blazor micro-frontend is mounted on the page by
++  // single-spa. This is to ensure that any global runtime references that Blazor depends on is
++  // restored before the application is added to the page.
++  restoreGlobalState?: () => void;
++
++  // B.W.S: This is intended to be called when a Blazor micro-frontend is unmounted from the page by
++  // single-spa. This is to clear any global runtime references added by Blazor so that any
++  // subsequently mounted Blazor micro-frontend does not try to reference the wrong runtime.
++  clearGlobalState?: () => void;
 +
    _internal: {
      navigationManager: typeof navigationManagerInternalFunctions | any;
