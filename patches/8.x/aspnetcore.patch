@@ -274,6 +274,24 @@ index 9b0089c2e7..37f63b25a3 100644
        path = base.endsWith('/') ? `${base}${path}` : `${base}/${path}`;
        return path;
      }
+diff --git a/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts b/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
+index 6bf151259e..a58298432f 100644
+--- a/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
++++ b/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
+@@ -179,7 +179,12 @@ async function importDotnetJs(startOptions: Partial<WebAssemblyStartOptions>): P
+     }
+   }
+ 
+-  const absoluteSrc = (new URL(src, document.baseURI)).toString();
++  // B.W.S: For a Blazor micro-frontend, we would typically expect the URL to the dotnet.js be
++  // provided by a custom boot resource loader. However, in case one was no provided, then we would
++  // expect the script to be available from the asset base URL. We default to the page's base URL in
++  // order to preserve Blazor's default behavior as much as possible.
++  const baseUrl = startOptions.assetBaseUrl ?? new URL(document.baseURI);
++  const absoluteSrc = (new URL(src, baseUrl)).toString();
+   return await import(/* webpackIgnore: true */ absoluteSrc);
+ }
+ 
 diff --git a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts b/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
 index 1a0af87a0e..f472b37731 100644
 --- a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
