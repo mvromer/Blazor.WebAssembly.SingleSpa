@@ -3,11 +3,17 @@
 Proof of concept around enabling the integration of Blazor WASM applications as micro frontends
 targeting single-spa
 
+> 🚨 **NOTE** 🚨
+>
+> In the near future, .NET 8 will be the only version of .NET targeted by this experimental package.
+> The .NET 7 specific versions will be dropped. Also, this README is in need of some major updates.
+> They will come once the work on supporting .NET 8 has settled.
+
 ## Applicable Versions
 
 The Blazor.WebAssembly.SingleSpa NuGet package contains experimental support for projects targeting
-.NET 7. Specifically, the assets for each target framework version were built from the following
-specific versions of ASP.NET Core:
+.NET 7 and .NET 8. Specifically, the assets for each target framework version were built from the
+following specific versions of ASP.NET Core:
 
 Target Framework Version | ASP.NET Core Version
 -------------------------|---------------------
