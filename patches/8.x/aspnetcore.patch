@@ -453,10 +453,19 @@ index 1c67981933..7bc80b40f9 100644
    link.rel = 'noopener noreferrer';
    link.click();
 diff --git a/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts b/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
-index 6bf151259e..a58298432f 100644
+index 6bf151259e..edb0ea820f 100644
 --- a/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
 +++ b/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
-@@ -179,7 +179,12 @@ async function importDotnetJs(startOptions: Partial<WebAssemblyStartOptions>): P
+@@ -15,6 +15,8 @@ import { BINDINGType, MONOType } from 'dotnet/dotnet-legacy';
+ import { fetchAndInvokeInitializers } from '../../JSInitializers/JSInitializers.WebAssembly';
+ import { JSInitializer } from '../../JSInitializers/JSInitializers';
+ import { WebRendererId } from '../../Rendering/WebRendererId';
++// B.W.S: Import the function used for getting the configured WebAssembly options.
++import { getWebAssemblyOptions } from '../../Boot.WebAssembly.Common';
+ 
+ // initially undefined and only fully initialized after createEmscriptenModuleInstance()
+ export let BINDING: BINDINGType = undefined as any;
+@@ -179,7 +181,12 @@ async function importDotnetJs(startOptions: Partial<WebAssemblyStartOptions>): P
      }
    }
  
@@ -470,6 +479,59 @@ index 6bf151259e..a58298432f 100644
    return await import(/* webpackIgnore: true */ absoluteSrc);
  }
  
+@@ -259,6 +266,10 @@ async function configureRuntimeInstance(): Promise<PlatformApi> {
+ 
+   attachDebuggerHotkey(getConfig());
+ 
++  // B.W.S: Patch the runtime's internal dynamic_import API so that the correct asset base URL is
++  // applied to imports from absolute and relative URL paths.
++  patchRuntimeDynamicImport(mono_internal);
++
+   Blazor.runtime = runtime;
+   Blazor._internal.dotNetCriticalError = printErr;
+   setModuleImports('blazor-internal', {
+@@ -277,6 +288,41 @@ async function configureRuntimeInstance(): Promise<PlatformApi> {
+   };
+ }
+ 
++// B.W.S: Patch the dynamic_import function from the .NET browser runtime's internal API. We do this
++// because the Blazor WebAssemblyHost (which resides in the C# side of Blazor) will import the .NET
++// hot reload JavaScript module via JS interop. It specifies the location of the script via the
++// absolute URL path "/_framework/hot-reload.js".
++//
++// This interop call will eventually make its way to the runtime's dynamic_import function. This
++// function is defined at the .NET runtime layer in .NET 8+. Prior to .NET 8, the import was handled
++// by the Microsoft.JSInterop.JS module that was bundled with the Blazor startup script, which we
++// were able to modify relatively easily as part of the patches B.W.S. makes to Blazor.
++//
++// However, now we can't (easily) modify code defined by the runtime. Instead, we define an
++// interceptor for the runtime's dynamic_import function that will inspect the given module URL. If
++// it is a relative or absolute URL path, we apply the asset base URL (if available) from the
++// WebAssembly options. If an asset base URL is not available, we pass the module URL unchanged to
++// the runtime's dynamic_import function.
++function patchRuntimeDynamicImport(internalRuntime: any) {
++  const webAssemblyOptions = getWebAssemblyOptions();
++  const assetBaseUrl = webAssemblyOptions.assetBaseUrl;
++  const originalDynamicImport = internalRuntime.dynamic_import;
++
++  const adjustUrlPath = (path: string) => {
++    if (path.startsWith('/')) {
++      return new URL(path.substring(1), assetBaseUrl).toString();
++    } else if (path.startsWith('./')) {
++      return new URL(path, assetBaseUrl).toString();
++    }
++    return path;
++  }
++
++  internalRuntime.dynamic_import = (moduleName: string, moduleUrl: string): Promise<any> => {
++    moduleUrl = adjustUrlPath(moduleUrl);
++    return originalDynamicImport(moduleName, moduleUrl);
++  };
++}
++
+ function setProgress(resourcesLoaded, totalResources) {
+   const percentage = resourcesLoaded / totalResources * 100;
+   document.documentElement.style.setProperty('--blazor-load-percentage', `${percentage}%`);
 diff --git a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts b/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
 index 1a0af87a0e..f472b37731 100644
 --- a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
