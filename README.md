@@ -3,21 +3,14 @@
 Proof of concept around enabling the integration of Blazor WASM applications as micro frontends
 targeting single-spa
 
-> 🚨 **NOTE** 🚨
->
-> In the near future, .NET 8 will be the only version of .NET targeted by this experimental package.
-> The .NET 7 specific versions will be dropped. Also, this README is in need of some major updates.
-> They will come once the work on supporting .NET 8 has settled.
-
 ## Applicable Versions
 
 The Blazor.WebAssembly.SingleSpa NuGet package contains experimental support for projects targeting
-.NET 7 and .NET 8. Specifically, the assets for each target framework version were built from the
-following specific versions of ASP.NET Core:
+.NET 8. Specifically, the assets for each target framework version were built from the following
+specific versions of ASP.NET Core:
 
 Target Framework Version | ASP.NET Core Version
 -------------------------|---------------------
-.NET 7                   | 7.0.15
 .NET 8                   | 8.0.1
 
 For a given target framework version, this package _may_ work for previous minor/patch releases.
@@ -46,8 +39,8 @@ micro frontends. See here: [blazing-lit-mfe-demo](https://github.com/mvromer/bla
 This repository is structured around the following idea: for a given major version `N` of ASP.NET
 Core, a submodule named `aspnetcore/N.x` is located at `src/aspnetcore/N.x`, Each submodule is
 configured to pull a version tag from the `dotnet/aspnetcore` repository matching the specified
-major version number, e.g., `src/aspnetcore/7.x` pulls the commit of `dotnet/aspnetcore` tagged with
-`v7.0.15`.
+major version number, e.g., `src/aspnetcore/8.x` pulls the commit of `dotnet/aspnetcore` tagged with
+`v8.0.1`.
 
 Within this project's `patches` directory are a corresponding set of patches and scripts, one for
 each major version of ASP.NET Core that has been tested. The `Build-PatchedBlazorWasm.ps1` script in
