@@ -89,7 +89,7 @@ export const { bootstrap, mount, unmount } = singleSpaBlazor({
   // reverse proxy hosted on the same domain. This would help ensure that all
   // requests from the browser for micro-frontend assets appear to be same-origin,
   // thus circumventing potential CORS issues.
-  assetBaseUrl: 'https://mysite.com/apps/my-blazor-app/',
+  assetBaseUrl: new URL('https://mysite.com/apps/my-blazor-app/'),
 
   // Client-side base URL the configure on the Blazor WASM application's navigation
   // manager. This will be the base URL the navigation manager uses for internal
@@ -100,7 +100,7 @@ export const { bootstrap, mount, unmount } = singleSpaBlazor({
   // configured to activate your Blazor WASM application when the client-side URL
   // starts with https://mysite.com/blazor-app/, then that same URL is set on the
   // navigationBaseUrl property.
-  navigationBaseUrl: 'https://mysite.com/blazor-app/',
+  navigationBaseUrl: new URL('https://mysite.com/blazor-app/'),
 
   // Optional paths to additional stylesheets to include when the Blazor WASM
   // micro-frontend is mounted by single-spa. These paths are relative to the asset
