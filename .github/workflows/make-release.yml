@@ -13,6 +13,7 @@ jobs:
   build-and-release:
     runs-on: ubuntu-latest
     steps:
+    # Setup build tools
     - uses: actions/checkout@v3
       with:
         submodules: recursive
@@ -24,12 +25,37 @@ jobs:
         dotnet-version: 8
     - name: Install Yarn 1
       run: npm install -g yarn
+
+    # Build and package Blazor.WebAssembly.SingleSpa NuGet package
     - name: Patch ASP.NET Core 8.x
       shell: pwsh
-      run: ./Blazor.WebAssembly.SingleSpa/patches/8.x/Build-PatchedBlazorWasm.ps1
+      run: ./patches/8.x/Build-PatchedBlazorWasm.ps1
+      working-directory: ./Blazor.WebAssembly.SingleSpa
     - name: Build and pack Blazor.WebAssembly.SingleSpa
-      run: dotnet pack --configuration Release /p:Version=${{ inputs.version }} ./Blazor.WebAssembly.SingleSpa/src/Blazor.WebAssembly.SingleSpa/Blazor.WebAssembly.SingleSpa.proj
+      run: dotnet pack --configuration Release /p:Version=${{ inputs.version }} ./src/Blazor.WebAssembly.SingleSpa/Blazor.WebAssembly.SingleSpa.proj
+      working-directory: ./Blazor.WebAssembly.SingleSpa
+
+    # Build and package blazor-wasm-single-spa NPM package
+    - name: Version blazor-wasm-single-spa
+      run: npm version ${{ inputs.version }} --no-git-tag-version
+      working-directory: ./blazor-wasm-single-spa
+    - name: Install blazor-wasm-single-spa dependencies
+      run: npm ci
+      working-directory: ./blazor-wasm-single-spa
+    - name: Build blazor-wasm-single-spa
+      run: npm run build
+      working-directory: ./blazor-wasm-single-spa
+    - name: Pack blazor-wasm-single-spa
+      run: npm pack
+      working-directory: ./blazor-wasm-single-spa
+
+    # Publish packages to respective artifact feeds
     - name: Publish Blazor.WebAssembly.SingleSpa ${{ inputs.version }}
-      run: dotnet nuget push ./Blazor.WebAssembly.SingleSpa/src/Blazor.WebAssembly.SingleSpa/bin/Release/Blazor.WebAssembly.SingleSpa.${{ inputs.version }}.nupkg -s https://api.nuget.org/v3/index.json -k $NUGET_AUTH_TOKEN
+      run: dotnet nuget push ./src/Blazor.WebAssembly.SingleSpa/bin/Release/Blazor.WebAssembly.SingleSpa.${{ inputs.version }}.nupkg -s https://api.nuget.org/v3/index.json -k $NUGET_AUTH_TOKEN
+      working-directory: ./Blazor.WebAssembly.SingleSpa
       env:
         NUGET_AUTH_TOKEN: ${{ secrets.NUGET_TOKEN }}
+    - name: Publish blazor-wasm-single-spa ${{ inputs.version }}
+      run: npm publish ./blazor-wasm-single-spa/blazor-wasm-single-spa-${{ inputs.version }}.tgz
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
