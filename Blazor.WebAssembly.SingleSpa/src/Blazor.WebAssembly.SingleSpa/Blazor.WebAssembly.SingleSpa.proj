@@ -9,8 +9,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\LICENSE" Pack="true" PackagePath="" />
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\..\LICENSE" Pack="true" PackagePath="" />
+    <None Include="..\..\..\README.md" Pack="true" PackagePath="\" />
 
     <Content Include="build\**\*" Pack="true" PackagePath="build" />
     <!-- For now create the lib/net* output directory. Otherwise the NuGet Pack task will throw
