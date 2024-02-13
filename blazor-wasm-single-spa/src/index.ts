@@ -14,7 +14,7 @@ type Parameter<T extends (arg: any) => any> = T extends (arg: infer U) => any ? 
 export type BlazorWebAssemblyAppExtension = {
   stylePaths?: string[];
   additionalImportPaths?: string[];
-  beforeBlazorStart?: (blazor: any, assetBaseUrl: URL) => void | Promise<void>;
+  beforeBlazorStart?: (assetBaseUrl: URL) => void | Promise<void>;
   afterBlazorRestore?: (blazor: any) => void | Promise<void>;
   afterBlazorClear?: (blazor: any) => void | Promise<void>;
 };
@@ -24,7 +24,7 @@ export type BlazorWebAssemblyOptions<ExtraProps = {}> = {
   appTagName: string;
   stylePaths?: string[];
   additionalImportPaths?: string[];
-  beforeBlazorStart?: (blazor: any, assetBaseUrl: URL) => void | Promise<void>;
+  beforeBlazorStart?: (assetBaseUrl: URL) => void | Promise<void>;
   afterBlazorRestore?: (blazor: any) => void | Promise<void>;
   afterBlazorClear?: (blazor: any) => void | Promise<void>;
   assetBaseUrl?: URL;
@@ -199,7 +199,7 @@ async function mount<ExtraProps>(
     // Run any before start callbacks that have been defined.
     for (const extension of extensions) {
       if (extension.beforeBlazorStart) {
-        await Promise.resolve(extension.beforeBlazorStart(blazor, assetBaseUrl));
+        await Promise.resolve(extension.beforeBlazorStart(assetBaseUrl));
       }
     }
 
