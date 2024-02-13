@@ -1,0 +1,39 @@
+{
+  "name": "blazor-wasm-single-spa",
+  "version": "0.1.0",
+  "description": "Experimental support for generating single-spa lifecycle hooks for Blazor WebAssembly micro-frontends",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mvromer/Blazor.WebAssembly.SingleSpa.git"
+  },
+  "keywords": [
+    "single-spa",
+    "blazor",
+    "wasm"
+  ],
+  "author": "Michael Romer",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/mvromer/Blazor.WebAssembly.SingleSpa/issues"
+  },
+  "homepage": "https://github.com/mvromer/Blazor.WebAssembly.SingleSpa#readme",
+  "devDependencies": {
+    "single-spa": "^6.0.0",
+    "typescript": "^5.3.3"
+  }
+}
