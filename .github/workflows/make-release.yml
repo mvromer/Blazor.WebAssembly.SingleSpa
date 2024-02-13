@@ -26,10 +26,10 @@ jobs:
       run: npm install -g yarn
     - name: Patch ASP.NET Core 8.x
       shell: pwsh
-      run: ./patches/8.x/Build-PatchedBlazorWasm.ps1
+      run: ./Blazor.WebAssembly.SingleSpa/patches/8.x/Build-PatchedBlazorWasm.ps1
     - name: Build and pack Blazor.WebAssembly.SingleSpa
-      run: dotnet pack --configuration Release /p:Version=${{ inputs.version }} ./src/Blazor.WebAssembly.SingleSpa/Blazor.WebAssembly.SingleSpa.proj
+      run: dotnet pack --configuration Release /p:Version=${{ inputs.version }} ./Blazor.WebAssembly.SingleSpa/src/Blazor.WebAssembly.SingleSpa/Blazor.WebAssembly.SingleSpa.proj
     - name: Publish Blazor.WebAssembly.SingleSpa ${{ inputs.version }}
-      run: dotnet nuget push ./src/Blazor.WebAssembly.SingleSpa/bin/Release/Blazor.WebAssembly.SingleSpa.${{ inputs.version }}.nupkg -s https://api.nuget.org/v3/index.json -k $NUGET_AUTH_TOKEN
+      run: dotnet nuget push ./Blazor.WebAssembly.SingleSpa/src/Blazor.WebAssembly.SingleSpa/bin/Release/Blazor.WebAssembly.SingleSpa.${{ inputs.version }}.nupkg -s https://api.nuget.org/v3/index.json -k $NUGET_AUTH_TOKEN
       env:
         NUGET_AUTH_TOKEN: ${{ secrets.NUGET_TOKEN }}

@@ -1,0 +1,3 @@
+[submodule "aspnetcore/8.x"]
+	path = Blazor.WebAssembly.SingleSpa/src/aspnetcore/8.x
+	url = https://github.com/dotnet/aspnetcore.git
