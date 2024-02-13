@@ -46,6 +46,8 @@ jobs:
     - name: Build blazor-wasm-single-spa
       run: npm run build
       working-directory: ./blazor-wasm-single-spa
+    - name: Copy README
+      run: cp README.md blazor-wasm-single-spa/
     - name: Pack blazor-wasm-single-spa
       run: npm pack
       working-directory: ./blazor-wasm-single-spa
