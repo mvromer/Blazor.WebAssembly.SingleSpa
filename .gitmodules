@@ -1,3 +1,0 @@
-[submodule "aspnetcore/8.x"]
-	path = src/aspnetcore/8.x
-	url = https://github.com/dotnet/aspnetcore.git
