@@ -41,6 +41,23 @@ export type BlazorWebAssemblyOptions<ExtraProps = {}> = {
   domElementGetter?: (props: AppProps) => HTMLElement;
 };
 
+// State that must be retained across the lifecycle of the Blazor micro-frontend. It must be
+// allocated for each micro-frontend that creates its lifecycle hooks with singleSpaBlazor.
+export type BlazorWebAssemblyAppState = {
+  // This is a template that gets built from the given BlazorWebAssemblyOptions. It will be used to
+  // render the Blazor application onto the DOM each time it is mounted.
+  appTemplate: HTMLTemplateElement;
+
+  // Reference to the Blazor runtime object used to manage the Blazor WebAssembly application and
+  // its associated .NET browser runtime.
+  blazor: any;
+
+  // The original caches.open function that we replace with a custom implementation that applies a
+  // discriminator to the cache name. This is necessary to ensure that each Blazor micro-frontend
+  // has its own cache, which Blazor typically only names after the page's base URL.
+  originalCachesOpen: (cacheName: string) => Promise<Cache>;
+}
+
 // These are props we know how to handle if they are present in the props passed by single-spa into
 // our lifecycle hooks. ExtraProps are any additional props that the Blazor micro-frontend expects
 // to define and use.
@@ -54,25 +71,12 @@ type BlazorWebAssemblyProps<ExtraProps = {}> = ExtraProps & {
 // The type of a lifecycle hook we produce with singleSpaBlazor.
 type BlazorWebAssemblyLifeCycleFn<ExtraProps> = LifeCycleFn<BlazorWebAssemblyProps<ExtraProps>>;
 
-// The set of lifecycle hooks we produce with singleSpaBlazor.
+// The set of lifecycle hooks and lifecycle state we produce with singleSpaBlazor.
 type BlazorWebAssemblyLifeCycles<ExtraProps> = {
   bootstrap: BlazorWebAssemblyLifeCycleFn<ExtraProps>;
   mount: BlazorWebAssemblyLifeCycleFn<ExtraProps>;
   unmount: BlazorWebAssemblyLifeCycleFn<ExtraProps>;
 };
-
-// This is a template that gets built from the given BlazorWebAssemblyOptions. It will be used to
-// render the Blazor application onto the DOM each time it is mounted.
-let appTemplate = document.createElement("template");
-
-// Reference to the Blazor runtime object used to manage the Blazor WebAssembly application and its
-// associated .NET browser runtime.
-let blazor: any;
-
-// The original caches.open function that we replace with a custom implementation that applies a
-// discriminator to the cache name. This is necessary to ensure that each Blazor micro-frontend has
-// its own cache, which Blazor typically only names after the page's base URL.
-let originalCachesOpen: (cacheName: string) => Promise<Cache>;
 
 export default function singleSpaBlazor<ExtraProps>(
   blazorOptions: BlazorWebAssemblyOptions<ExtraProps>
@@ -105,19 +109,26 @@ export default function singleSpaBlazor<ExtraProps>(
   // The final is the return type of the bound function.
   type LifeCycleHelperFn = (
     o: BlazorWebAssemblyOptions<ExtraProps>,
+    a: BlazorWebAssemblyAppState,
     p: Parameter<BlazorWebAssemblyLifeCycleFn<ExtraProps>>
   ) => ReturnType<BlazorWebAssemblyLifeCycleFn<ExtraProps>>;
 
   type This = null;
   type HelperParameters = Parameters<LifeCycleHelperFn>;
-  type Options = [HelperParameters[0]];
-  type Props = [HelperParameters[1]];
+  type Options = [HelperParameters[0], HelperParameters[1]];
+  type Props = [HelperParameters[2]];
   type Result = ReturnType<LifeCycleHelperFn>;
 
+  const appState: BlazorWebAssemblyAppState = {
+    appTemplate: document.createElement("template"),
+    blazor: undefined,
+    originalCachesOpen: () => { throw new Error('Original caches.open has not been stored yet.') },
+  };
+
   return {
-    bootstrap: bootstrap.bind<This, Options, Props, Result>(null, blazorOptions),
-    mount: mount.bind<This, Options, Props, Result>(null, blazorOptions),
-    unmount: unmount.bind<This, Options, Props, Result>(null, blazorOptions),
+    bootstrap: bootstrap.bind<This, Options, Props, Result>(null, blazorOptions, appState),
+    mount: mount.bind<This, Options, Props, Result>(null, blazorOptions, appState),
+    unmount: unmount.bind<This, Options, Props, Result>(null, blazorOptions, appState),
   };
 }
 
@@ -142,6 +153,7 @@ export default function singleSpaBlazor<ExtraProps>(
 // unmount lifecycle hooks are resolved before any mount lifecycle hooks are called.
 function bootstrap<ExtraProps>(
   _blazorOptions: BlazorWebAssemblyOptions<ExtraProps>,
+  _blazorAppState: BlazorWebAssemblyAppState,
   _props: Parameter<BlazorWebAssemblyLifeCycleFn<ExtraProps>>
 ): ReturnType<BlazorWebAssemblyLifeCycleFn<ExtraProps>> {
   return Promise.resolve();
@@ -161,6 +173,7 @@ function bootstrap<ExtraProps>(
 // Once loaded and started, the Blazor micro-frontend will be mounted to the DOM.
 async function mount<ExtraProps>(
   blazorOptions: BlazorWebAssemblyOptions<ExtraProps>,
+  blazorAppState: BlazorWebAssemblyAppState,
   props: Parameter<BlazorWebAssemblyLifeCycleFn<ExtraProps>>
 ): ReturnType<BlazorWebAssemblyLifeCycleFn<ExtraProps>> {
   const { name: appName } = props;
@@ -174,17 +187,17 @@ async function mount<ExtraProps>(
 
   // Install an interceptor for caches.open so that we can apply a discriminator to the named
   // cache the .NET browser runtime will user for caching .NET assets.
-  originalCachesOpen = globalThis.caches.open;
+  blazorAppState.originalCachesOpen = globalThis.caches.open;
   globalThis.caches.open = function (cacheName) {
-    return originalCachesOpen.call(globalThis.caches, `${cacheName}-${appName}`);
+    return blazorAppState.originalCachesOpen.call(globalThis.caches, `${cacheName}-${appName}`);
   };
 
-  if (blazor === undefined) {
+  if (blazorAppState.blazor === undefined) {
     // On first mount, import the Blazor runtime for the Blazor micro-frontend. Capture the Blazor
     // runtime reference from the window after it has been imported.
     await import(new URL("_framework/blazor.webassembly.js", assetBaseUrl).href);
     // @ts-expect-error (ts7015) - We don't have a better type than any for the Blazor object.
-    blazor = window["Blazor"];
+    blazorAppState.blazor = window["Blazor"];
 
     // Import any additional scripts that need to be loaded before the Blazor runtime and
     // application are started.
@@ -215,7 +228,7 @@ async function mount<ExtraProps>(
           })
     );
 
-    appTemplate.content.append(...styleElements, document.createElement(blazorOptions.appTagName));
+    blazorAppState.appTemplate.content.append(...styleElements, document.createElement(blazorOptions.appTagName));
 
     if (blazorOptions.injectRefreshScript) {
       // If debugging is enabled, then we need to inject the ASP.NET Core browser refresh script.
@@ -224,11 +237,11 @@ async function mount<ExtraProps>(
         "_framework/aspnetcore-browser-refresh.js",
         assetBaseUrl
       ).href;
-      appTemplate.content.append(browserRefreshScript);
+      blazorAppState.appTemplate.content.append(browserRefreshScript);
     }
 
     // Start the Blazor runtime and its application.
-    await blazor.start({
+    await blazorAppState.blazor.start({
       // NOTE: These are critical for integration. They control how Blazor will resolve relative and
       // absolute URL paths for assets and navigation. Without them, Blazor will tend to resolve
       // these relative to the page's base URL, which is not what we want in the case of a Blazor
@@ -258,20 +271,20 @@ async function mount<ExtraProps>(
   } else {
     // After the first mount, restore global Blazor state on the window and ensure Blazor's DOM
     // listeners are reconnected and ready.
-    blazor.restoreGlobalState();
-    blazor.ensureDomListenersReady();
+    blazorAppState.blazor.restoreGlobalState();
+    blazorAppState.blazor.ensureDomListenersReady();
 
     // Run any after restore callbacks that have been defined.
     for (const appExtension of extensions) {
       if (appExtension.afterBlazorRestore) {
-        await Promise.resolve(appExtension.afterBlazorRestore(blazor));
+        await Promise.resolve(appExtension.afterBlazorRestore(blazorAppState.blazor));
       }
     }
   }
 
   // Force the Blazor navigation manager to resync with the page's current URL before mounting the
   // application.
-  blazor.navigateTo(document.location.href, {
+  blazorAppState.blazor.navigateTo(document.location.href, {
     replaceHistoryEntry: true,
     forceLoad: false,
   });
@@ -286,12 +299,13 @@ async function mount<ExtraProps>(
   const domElementGetter = chooseDomElementGetter(blazorOptions, props);
   const mountPoint = domElementGetter(props);
   if (mountPoint) {
-    mountPoint.replaceChildren(appTemplate.content.cloneNode(true));
+    mountPoint.replaceChildren(blazorAppState.appTemplate.content.cloneNode(true));
   }
 }
 
 async function unmount<ExtraProps>(
   blazorOptions: BlazorWebAssemblyOptions<ExtraProps>,
+  blazorAppState: BlazorWebAssemblyAppState,
   props: Parameter<BlazorWebAssemblyLifeCycleFn<ExtraProps>>
 ): ReturnType<BlazorWebAssemblyLifeCycleFn<ExtraProps>> {
   const extensions = getExtensions(blazorOptions);
@@ -305,20 +319,20 @@ async function unmount<ExtraProps>(
     // Ensure the Blazor micro-frontend has disposed its components before proceeding. Then remove
     // any event listeners that Blazor has attached to the DOM and cleanup the global state added
     // by Blazor.
-    await blazor.ensureRazorComponentsDisposed();
-    blazor.ensureDomListenersRemoved();
-    blazor.clearGlobalState();
+    await blazorAppState.blazor.ensureRazorComponentsDisposed();
+    blazorAppState.blazor.ensureDomListenersRemoved();
+    blazorAppState.blazor.clearGlobalState();
 
     // Run any after clear callbacks that have been defined.
     for (const extension of extensions) {
       if (extension.afterBlazorClear) {
-        await Promise.resolve(extension.afterBlazorClear(blazor));
+        await Promise.resolve(extension.afterBlazorClear(blazorAppState.blazor));
       }
     }
   }
 
   // Restore the original caches.open function.
-  globalThis.caches.open = originalCachesOpen;
+  globalThis.caches.open = blazorAppState.originalCachesOpen;
 }
 
 function getExtensions<ExtraProps>(blazorOptions: BlazorWebAssemblyOptions<ExtraProps>) {
