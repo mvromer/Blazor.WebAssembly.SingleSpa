@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
   [Parameter(HelpMessage = "If set, then resulting JS will not be minified. Useful for viewing build output.")]
-  [switch] $DisableMinify
+  [switch] $DisableMinify,
+
+  [Parameter(HelpMessage = "If set, then patches adding single-spa support will not be applied. Can be used to produce unminified versions of the Blazor startup script.")]
+  [switch] $SkipSingleSpaPatch
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,8 +27,11 @@ function Assert-LastExitCode {
 Write-Host -ForegroundColor Yellow "Applying ASP.NET Core patches"
 Push-Location $buildRootDir/src/aspnetcore/8.x
 git restore .
-git apply $patchDir/aspnetcore.patch
-Assert-LastExitCode
+
+if (-not $SkipSingleSpaPatch) {
+  git apply $patchDir/aspnetcore.patch
+  Assert-LastExitCode
+}
 
 if ($DisableMinify) {
   git apply $patchDir/aspnetcore-unset-minify.patch

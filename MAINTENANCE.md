@@ -33,16 +33,17 @@ targeted version of ASP.NET Core 7.x, run the following:
 
 ```sh
 # Navigate to the version-specific submodule
-cd src/aspnetcore/7.x
+cd Blazor.WebAssembly.SingleSpa/src/aspnetcore/7.x
 
 # Clear out any local changes
 git restore .
 
-# Checkout the desired version from aspnetcore repository, e.g., v7.0.15
+# Fetch latest tags and checkout the desired version from aspnetcore repository, e.g., v7.0.15
+git fetch
 git checkout --recurse-submodules v7.0.15
 
 # Stage the submodule update and commit
-cd ../../..
-git add src/aspnetcore/7.x
+cd ../../../..
+git add Blazor.WebAssembly.SingleSpa/src/aspnetcore/7.x
 git commit -m "Update supported ASP.NET Core 7.x version to 7.0.15"
 ```
