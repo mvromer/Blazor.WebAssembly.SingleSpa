@@ -796,7 +796,7 @@ index 976e5a9c75..cdd7fc090f 100644
    return browserRenderers[browserRendererId];
  }
 diff --git a/src/Components/Web.JS/src/Services/NavigationManager.ts b/src/Components/Web.JS/src/Services/NavigationManager.ts
-index a31c2ff82f..d4dc7d8704 100644
+index a31c2ff82f..b3f7779362 100644
 --- a/src/Components/Web.JS/src/Services/NavigationManager.ts
 +++ b/src/Components/Web.JS/src/Services/NavigationManager.ts
 @@ -4,11 +4,15 @@
@@ -898,6 +898,31 @@ index a31c2ff82f..d4dc7d8704 100644
  
  function refresh(forceReload: boolean): void {
    if (!forceReload && hasProgrammaticEnhancedNavigationHandler()) {
+@@ -266,11 +310,20 @@ async function notifyLocationChanged(interceptedLink: boolean, internalDestinati
+ }
+ 
+ async function onPopState(state: PopStateEvent) {
+-  if (popStateCallback && currentPageLoadMechanism() !== 'serverside-enhanced') {
+-    await popStateCallback(state);
+-  }
++  // B.W.S: single-spa will fire synthetic popstate events to signal any active micro-frontends when
++  // to re-render. These synthetic popstate events are fired when the history.pushState or
++  // history.replaceState APIs are called. These events can interfere with the way Blazor manages
++  // the history stack, especially when a Blazor NavigationLock in use. Fortunately, single-spa
++  // makes it easy to distinguish synthetic popstate events from those fired by the browser. For the
++  // former, the event will contain a singleSpa property that evaluates to truthy, which we check
++  // here to ensure Blazor's popstate logic only execute on true popstate events.
++  if (state.singleSpa) {
++    if (popStateCallback && currentPageLoadMechanism() !== 'serverside-enhanced') {
++      await popStateCallback(state);
++    }
+ 
+-  currentHistoryIndex = history.state?._index ?? 0;
++    currentHistoryIndex = history.state?._index ?? 0;
++  }
+ }
+ 
+ function getInteractiveRouterNavigationCallbacks(): NavigationCallbacks | undefined {
 diff --git a/src/Components/Web.JS/src/Services/NavigationUtils.ts b/src/Components/Web.JS/src/Services/NavigationUtils.ts
 index 4ce44461ec..e0b3d2046d 100644
 --- a/src/Components/Web.JS/src/Services/NavigationUtils.ts
