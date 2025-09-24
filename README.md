@@ -18,7 +18,7 @@ version of ASP.NET Core from which the assets were built.
 
 Target Framework Version | ASP.NET Core Version
 -------------------------|---------------------
-.NET 8                   | 8.0.1
+.NET 8                   | 8.0.15
 
 For a given target framework version, the Blazor.WebAssembly.SingleSpa package _may_ work for
 previous minor/patch releases. However, no guarantees are given.

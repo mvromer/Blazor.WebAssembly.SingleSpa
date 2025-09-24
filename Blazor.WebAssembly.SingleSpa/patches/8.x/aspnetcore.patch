@@ -112,7 +112,7 @@ index f6d3824f32..6946d9d093 100644
  function invokeJSFromDotNet(callInfo: Pointer, arg0: any, arg1: any, arg2: any): any {
    const functionIdentifier = monoPlatform.readStringField(callInfo, 0)!;
 diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.ts b/src/Components/Web.JS/src/Boot.WebAssembly.ts
-index bd8e556096..a6558cdef0 100644
+index bd8e556096..1df8e4b4bc 100644
 --- a/src/Components/Web.JS/src/Boot.WebAssembly.ts
 +++ b/src/Components/Web.JS/src/Boot.WebAssembly.ts
 @@ -6,13 +6,24 @@ import { Blazor } from './GlobalExports';
@@ -141,7 +141,7 @@ index bd8e556096..a6558cdef0 100644
  
  async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
    if (started) {
-@@ -20,15 +31,98 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
+@@ -20,15 +31,106 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
    }
    started = true;
  
@@ -207,14 +207,22 @@ index bd8e556096..a6558cdef0 100644
 +// B.W.S: Blazor and the .NET browser platform will write to the global window references to a
 +// number of runtime objects that are initialized as part of Blazor's startup sequence. Different
 +// parts of Blazor, the .NET browser runtime, and some third-party libraries assume access to these
-+// global references; however, without intervention, this prevents more a page using single-spa to
-+// have more than one Blazor micro-frontend registered because each one will simply clobber the
++// global references; however, without intervention, this prevents a page using single-spa from
++// having more than one Blazor micro-frontend registered because each one will simply clobber the
 +// others' runtime references.
 +//
 +// To work around this, we store these references just before Blazor's boot function returns. Then,
 +// each Blazor micro-frontend should call restoreGlobalState just before it adds its Blazor
 +// application to the DOM. Finally, each micro-frontend should call clearGlobalState just before it
 +// returns from its unmount lifecycle hook.
++//
++// Note that this doesn't necessarily mean that a page can have multiple Blazor micro-frontends
++// active simultaneously. Since each micro-frontend is effectively a separate, sandboxed instance of
++// Blazor and its associated .NET runtime, the fact that Blazor, the runtime, and third-party
++// libraries access global references written to the window object means that the last Blazor
++// micro-frontend to be mounted will be the one that has its global references restored. Any other
++// active Blazor micro-frontends will potentially call into the wrong instance of Blazor if one of
++// its components tries to access these global references.
 +function restoreGlobalState() {
 +  window['DotNet'] = DotNet;
 +  window['Blazor'] = Blazor;
@@ -242,7 +250,7 @@ index bd8e556096..a6558cdef0 100644
  
  if (shouldAutoStart()) {
 diff --git a/src/Components/Web.JS/src/GlobalExports.ts b/src/Components/Web.JS/src/GlobalExports.ts
-index 4af7b56fbf..5b9ce3d660 100644
+index 46ec7fc747..0d162b5566 100644
 --- a/src/Components/Web.JS/src/GlobalExports.ts
 +++ b/src/Components/Web.JS/src/GlobalExports.ts
 @@ -44,6 +44,38 @@ export interface IBlazor {
@@ -453,7 +461,7 @@ index 1c67981933..7bc80b40f9 100644
    link.rel = 'noopener noreferrer';
    link.click();
 diff --git a/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts b/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
-index 6bf151259e..edb0ea820f 100644
+index 6bf151259e..7268fe1859 100644
 --- a/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
 +++ b/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
 @@ -15,6 +15,8 @@ import { BINDINGType, MONOType } from 'dotnet/dotnet-legacy';
@@ -471,7 +479,7 @@ index 6bf151259e..edb0ea820f 100644
  
 -  const absoluteSrc = (new URL(src, document.baseURI)).toString();
 +  // B.W.S: For a Blazor micro-frontend, we would typically expect the URL to the dotnet.js be
-+  // provided by a custom boot resource loader. However, in case one was no provided, then we would
++  // provided by a custom boot resource loader. However, in case one was not provided, then we would
 +  // expect the script to be available from the asset base URL. We default to the page's base URL in
 +  // order to preserve Blazor's default behavior as much as possible.
 +  const baseUrl = startOptions.assetBaseUrl ?? new URL(document.baseURI);
@@ -788,15 +796,15 @@ index 976e5a9c75..cdd7fc090f 100644
    return browserRenderers[browserRendererId];
  }
 diff --git a/src/Components/Web.JS/src/Services/NavigationManager.ts b/src/Components/Web.JS/src/Services/NavigationManager.ts
-index 7a6e0bbbbf..8ddf3a94c0 100644
+index a31c2ff82f..b3f7779362 100644
 --- a/src/Components/Web.JS/src/Services/NavigationManager.ts
 +++ b/src/Components/Web.JS/src/Services/NavigationManager.ts
 @@ -4,11 +4,15 @@
  import '@microsoft/dotnet-js-interop';
  import { resetScrollAfterNextBatch } from '../Rendering/Renderer';
  import { EventDelegator } from '../Rendering/Events/EventDelegator';
--import { attachEnhancedNavigationListener, getInteractiveRouterRendererId, handleClickForNavigationInterception, hasInteractiveRouter, hasProgrammaticEnhancedNavigationHandler, isWithinBaseUriSpace, performProgrammaticEnhancedNavigation, setHasInteractiveRouter, toAbsoluteUri } from './NavigationUtils';
-+import { attachEnhancedNavigationListener, detachEnhancedNavigationListener, getInteractiveRouterRendererId, handleClickForNavigationInterception, hasInteractiveRouter, hasProgrammaticEnhancedNavigationHandler, isWithinBaseUriSpace, performProgrammaticEnhancedNavigation, setHasInteractiveRouter, toAbsoluteUri } from './NavigationUtils';
+-import { attachEnhancedNavigationListener, getInteractiveRouterRendererId, handleClickForNavigationInterception, hasInteractiveRouter, hasProgrammaticEnhancedNavigationHandler, isSamePageWithHash, isWithinBaseUriSpace, performProgrammaticEnhancedNavigation, performScrollToElementOnTheSamePage, scrollToElement, setHasInteractiveRouter, toAbsoluteUri } from './NavigationUtils';
++import { attachEnhancedNavigationListener, detachEnhancedNavigationListener, getInteractiveRouterRendererId, handleClickForNavigationInterception, hasInteractiveRouter, hasProgrammaticEnhancedNavigationHandler, isSamePageWithHash, isWithinBaseUriSpace, performProgrammaticEnhancedNavigation, performScrollToElementOnTheSamePage, scrollToElement, setHasInteractiveRouter, toAbsoluteUri } from './NavigationUtils';
  import { WebRendererId } from '../Rendering/WebRendererId';
  import { isRendererAttached } from '../Rendering/WebRendererInteropMethods';
  import { IBlazor } from '../GlobalExports';
@@ -847,7 +855,7 @@ index 7a6e0bbbbf..8ddf3a94c0 100644
  function setHasLocationChangingListeners(rendererId: WebRendererId, hasListeners: boolean) {
    const callbacks = navigationCallbacks.get(rendererId);
    if (!callbacks) {
-@@ -86,14 +113,33 @@ export function attachToEventDelegator(eventDelegator: EventDelegator): void {
+@@ -76,17 +103,34 @@ export function attachToEventDelegator(eventDelegator: EventDelegator): void {
    // We need to respond to clicks on <a> elements *after* the EventDelegator has finished
    // running its simulated bubbling process so that we can respect any preventDefault requests.
    // So instead of registering our own native event, register using the EventDelegator.
@@ -855,24 +863,24 @@ index 7a6e0bbbbf..8ddf3a94c0 100644
 -    if (!hasInteractiveRouter()) {
 -      return;
 -    }
- 
--    handleClickForNavigationInterception(event, absoluteInternalHref => {
--      performInternalNavigation(absoluteInternalHref, /* interceptedLink */ true, /* replace */ false);
--    });
 +  // B.W.S: Modified so that the callback is moved to a named function. This allows it to be later
 +  // removed from the EventDelegator when a Blazor micro-frontend is unmounted from the page by
 +  // single-spa.
 +  eventDelegator.notifyAfterClick(afterClickCallback);
 +}
-+
+ 
+-    handleClickForNavigationInterception(event, absoluteInternalHref => {
+-      performInternalNavigation(absoluteInternalHref, /* interceptedLink */ true, /* replace */ false);
+-    });
+-  });
 +// B.W.S: The inverse of attachToEventDelegator. This is expected to be called by each
 +// BrowserRenderer (via its detachNavigationManager method) when a Blazor micro-frontend is
 +// unmounted from the page by single-spa. This is to prevent the Blazor application from attempting
 +// to respond to click events when the application is not active on the page.
 +export function detachFromEventDelegator(eventDelegator: EventDelegator): void {
 +  eventDelegator.removeAfterClickCallback(afterClickCallback);
-+}
-+
+ }
+ 
 +// B.W.S: The original implementation had this function defined inline to the call to the
 +// notifyAfterClick method inside attachEventDelegator. Since the callback needs to be removed from
 +// the EventDelegator when a Blazor micro-frontend is unmounted from the page by single-spa, the
@@ -885,11 +893,38 @@ index 7a6e0bbbbf..8ddf3a94c0 100644
 +
 +  handleClickForNavigationInterception(event, absoluteInternalHref => {
 +    performInternalNavigation(absoluteInternalHref, /* interceptedLink */ true, /* replace */ false);
-   });
++  });
++}
+ 
+ function refresh(forceReload: boolean): void {
+   if (!forceReload && hasProgrammaticEnhancedNavigationHandler()) {
+@@ -266,11 +310,20 @@ async function notifyLocationChanged(interceptedLink: boolean, internalDestinati
  }
  
+ async function onPopState(state: PopStateEvent) {
+-  if (popStateCallback && currentPageLoadMechanism() !== 'serverside-enhanced') {
+-    await popStateCallback(state);
+-  }
++  // B.W.S: single-spa will fire synthetic popstate events to signal any active micro-frontends when
++  // to re-render. These synthetic popstate events are fired when the history.pushState or
++  // history.replaceState APIs are called. These events can interfere with the way Blazor manages
++  // the history stack, especially when a Blazor NavigationLock in use. Fortunately, single-spa
++  // makes it easy to distinguish synthetic popstate events from those fired by the browser. For the
++  // former, the event will contain a singleSpa property that evaluates to truthy, which we check
++  // here to ensure Blazor's popstate logic only execute on true popstate events.
++  if (state.singleSpa) {
++    if (popStateCallback && currentPageLoadMechanism() !== 'serverside-enhanced') {
++      await popStateCallback(state);
++    }
+ 
+-  currentHistoryIndex = history.state?._index ?? 0;
++    currentHistoryIndex = history.state?._index ?? 0;
++  }
+ }
+ 
+ function getInteractiveRouterNavigationCallbacks(): NavigationCallbacks | undefined {
 diff --git a/src/Components/Web.JS/src/Services/NavigationUtils.ts b/src/Components/Web.JS/src/Services/NavigationUtils.ts
-index a278ac5414..6c74c3810a 100644
+index 4ce44461ec..e0b3d2046d 100644
 --- a/src/Components/Web.JS/src/Services/NavigationUtils.ts
 +++ b/src/Components/Web.JS/src/Services/NavigationUtils.ts
 @@ -7,6 +7,14 @@ let interactiveRouterRendererId: WebRendererId | undefined = undefined;
@@ -919,7 +954,7 @@ index a278ac5414..6c74c3810a 100644
    const nextChar = href.charAt(baseUriWithoutTrailingSlash.length);
  
    return href.startsWith(baseUriWithoutTrailingSlash)
-@@ -51,6 +62,12 @@ export function attachEnhancedNavigationListener(listener: typeof enhancedNaviga
+@@ -70,6 +81,12 @@ export function attachEnhancedNavigationListener(listener: typeof enhancedNaviga
    enhancedNavigationListener = listener;
  }
  
@@ -932,7 +967,7 @@ index a278ac5414..6c74c3810a 100644
  export function notifyEnhancedNavigationListners(internalDestinationHref: string, interceptedLink: boolean) {
    enhancedNavigationListener?.(internalDestinationHref, interceptedLink);
  }
-@@ -78,7 +95,15 @@ function toBaseUriWithoutTrailingSlash(baseUri: string) {
+@@ -97,7 +114,15 @@ function toBaseUriWithoutTrailingSlash(baseUri: string) {
  let testAnchor: HTMLAnchorElement;
  export function toAbsoluteUri(relativeUri: string): string {
    testAnchor = testAnchor || document.createElement('a');
