@@ -914,7 +914,7 @@ index a31c2ff82f..f861a0e6c8 100644
 +  // here to ensure Blazor's popstate logic only execute on true popstate events.
 +  //
 +  // @ts-expect-error singleSpa property added by single-spa on synthetic popstate events.
-+  if (state.singleSpa) {
++  if (!state.singleSpa) {
 +    if (popStateCallback && currentPageLoadMechanism() !== 'serverside-enhanced') {
 +      await popStateCallback(state);
 +    }
