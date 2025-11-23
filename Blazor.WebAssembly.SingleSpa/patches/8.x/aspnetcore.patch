@@ -796,7 +796,7 @@ index 976e5a9c75..cdd7fc090f 100644
    return browserRenderers[browserRendererId];
  }
 diff --git a/src/Components/Web.JS/src/Services/NavigationManager.ts b/src/Components/Web.JS/src/Services/NavigationManager.ts
-index a31c2ff82f..f861a0e6c8 100644
+index a31c2ff82f..d2903ada59 100644
 --- a/src/Components/Web.JS/src/Services/NavigationManager.ts
 +++ b/src/Components/Web.JS/src/Services/NavigationManager.ts
 @@ -4,11 +4,15 @@
@@ -898,33 +898,29 @@ index a31c2ff82f..f861a0e6c8 100644
  
  function refresh(forceReload: boolean): void {
    if (!forceReload && hasProgrammaticEnhancedNavigationHandler()) {
-@@ -266,11 +310,22 @@ async function notifyLocationChanged(interceptedLink: boolean, internalDestinati
- }
+@@ -235,7 +279,21 @@ async function onBrowserInitiatedPopState(state: PopStateEvent) {
+   ignorePendingNavigation();
  
- async function onPopState(state: PopStateEvent) {
--  if (popStateCallback && currentPageLoadMechanism() !== 'serverside-enhanced') {
--    await popStateCallback(state);
--  }
-+  // B.W.S: single-spa will fire synthetic popstate events to signal any active micro-frontends when
-+  // to re-render. These synthetic popstate events are fired when the history.pushState or
-+  // history.replaceState APIs are called. These events can interfere with the way Blazor manages
-+  // the history stack, especially when a Blazor NavigationLock in use. Fortunately, single-spa
-+  // makes it easy to distinguish synthetic popstate events from those fired by the browser. For the
-+  // former, the event will contain a singleSpa property that evaluates to truthy, which we check
-+  // here to ensure Blazor's popstate logic only execute on true popstate events.
+   const callbacks = getInteractiveRouterNavigationCallbacks();
+-  if (callbacks?.hasLocationChangingEventListeners) {
++  // B.W.S.: single-spa will fire synthetic popstate events to signal to any active micro-frontends
++  // when to re-render. These syntehtic popstate events are fired when the history.pushState or
++  // history.replaceState APIs are called. These synthetic events can interfere with the way Blazor
++  // manages the history stack here when there are any location changing event listeners, such as
++  // when a Blazor NavigationLock is in use. In particular it's possible for a synthetic popstate
++  // event to trigger this code path, compute a delta of zero, and then cause the page to reload
++  // itself when navigateHistoryWithoutPopStateCallback calls history.go with that zero delta.
++  //
++  // Fortunately, single-spa makes it easy to distinguish synthetic popstate events from those fired
++  // by the browser. For the former, the event will contain a singleSpa property that evaluates to
++  // truthy, which we check here to ensure Blazor manipulates the history stack during location
++  // changing events only when true popstate events from the browser are processed.
 +  //
 +  // @ts-expect-error singleSpa property added by single-spa on synthetic popstate events.
-+  if (!state.singleSpa) {
-+    if (popStateCallback && currentPageLoadMechanism() !== 'serverside-enhanced') {
-+      await popStateCallback(state);
-+    }
- 
--  currentHistoryIndex = history.state?._index ?? 0;
-+    currentHistoryIndex = history.state?._index ?? 0;
-+  }
- }
- 
- function getInteractiveRouterNavigationCallbacks(): NavigationCallbacks | undefined {
++  if (!state.singleSpa && callbacks?.hasLocationChangingEventListeners) {
+     const index = state.state?._index ?? 0;
+     const userState = state.state?.userState;
+     const delta = index - currentHistoryIndex;
 diff --git a/src/Components/Web.JS/src/Services/NavigationUtils.ts b/src/Components/Web.JS/src/Services/NavigationUtils.ts
 index 4ce44461ec..e0b3d2046d 100644
 --- a/src/Components/Web.JS/src/Services/NavigationUtils.ts
