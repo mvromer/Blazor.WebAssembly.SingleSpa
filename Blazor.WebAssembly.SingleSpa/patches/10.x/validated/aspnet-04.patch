@@ -1,0 +1,15 @@
+diff --git a/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts b/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts
+index ff5bc46426..0e843fea65 100644
+--- a/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts
++++ b/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts
+@@ -36,7 +36,9 @@ export async function fetchAndInvokeInitializers(options: Partial<WebAssemblySta
+       })) as JSAsset[];
+     }
+ 
+-    await jsInitializer.importInitializersAsync(initializers, initializerArguments);
++    // B.W.S: Pass down the asset base URL to the initializer so that it can resolve relative and
++    // absolute URL paths to the initializer's module.
++    await jsInitializer.importInitializersAsync(initializers, initializerArguments, options.assetBaseUrl);
+     return jsInitializer;
+   }
+ }

@@ -1,0 +1,140 @@
+diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.ts b/src/Components/Web.JS/src/Boot.WebAssembly.ts
+index bd8e556096..1df8e4b4bc 100644
+--- a/src/Components/Web.JS/src/Boot.WebAssembly.ts
++++ b/src/Components/Web.JS/src/Boot.WebAssembly.ts
+@@ -6,13 +6,24 @@ import { Blazor } from './GlobalExports';
+ import { shouldAutoStart } from './BootCommon';
+ import { WebAssemblyStartOptions } from './Platform/WebAssemblyStartOptions';
+-import { setWebAssemblyOptions, startWebAssembly } from './Boot.WebAssembly.Common';
++// B.W.S: Import function used for adding navigation event listeners specifically for the
++// WebAssembly renderer.
++import { addWebAssemblyNavigationEventListeners, setWebAssemblyOptions, startWebAssembly } from './Boot.WebAssembly.Common';
+ import { WebAssemblyComponentDescriptor, discoverComponents, discoverWebAssemblyOptions } from './Services/ComponentDescriptorDiscovery';
+ import { DotNet } from '@microsoft/dotnet-js-interop';
+ import { InitialRootComponentsList } from './Services/InitialRootComponentsList';
+ import { JSEventRegistry } from './Services/JSEventRegistry';
+ import { printErr } from './Platform/Mono/MonoPlatform';
++// B.W.S: Need to import some functions used for ensuring listeners are ready, DOM is restored, etc.
++import { attachDebuggerHotkey, detachDebuggerHotKey } from './Platform/Mono/MonoDebugger';
++import { removeNavigationEventListeners } from './Services/NavigationManager';
++import { getRenderers } from './Rendering/Renderer';
++import { WebRendererId } from './Rendering/WebRendererId';
+ 
+ let started = false;
++// B.W.S: Used to keep track of whether Blazor's DOM listeners are ready. This helps ensure we don't
++// try to re-add any listeners in case the Blazor micro-frontend calls ensureDomListenersReady
++// either back-to-back or immediately after the initial boot of Blazor.
++let domListenersReady = false;
+ 
+ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
+   if (started) {
+@@ -20,16 +31,107 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
+   }
+   started = true;
+ 
+-  setWebAssemblyOptions(Promise.resolve(options || {}));
++  // B.W.S: Ensure navigation and asset base URLs default to the current page's base URL to preserve
++  // as much as possible Blazor's default behavior. Also, set the base URL Microsoft.JSInterop.JS
++  // will use when resolving relative or absolute URL paths to dynamically imported JavaScript
++  // modules so that any dynamic imports triggered by the Blazor application starting can properly
++  // locate their resources.
++  options ??= {};
++  options.assetBaseUrl ??= new URL(document.baseURI);
++  options.navigationBaseUrl ??= new URL(document.baseURI);
++  DotNet.setImportBaseUrl(options.assetBaseUrl);
++  setWebAssemblyOptions(Promise.resolve(options));
+ 
+   JSEventRegistry.create(Blazor);
+   const webAssemblyComponents = discoverComponents(document, 'webassembly') as WebAssemblyComponentDescriptor[];
+   const webAssemblyOptions = discoverWebAssemblyOptions(document);
+ 
+   const components = new InitialRootComponentsList(webAssemblyComponents);
+   await startWebAssembly(components, webAssemblyOptions);
++  // B.W.S: On boot, Blazor will ensure its DOM listeners (specifically those used for handling
++  // navigation events) are ready to go. We keep track of the ready state here so that we don't
++  // try to re-add any listeners in case the Blazor micro-frontend calls ensureDomListenersReady
++  // immediately after the initial boot.
++  domListenersReady = true;
++}
++
++// B.W.S: See updates to IBlazor for detailed explanation.
++function ensureDomListenersReady() {
++  if (domListenersReady) {
++    return;
++  }
++
++  attachDebuggerHotkey(Blazor.runtime.getConfig());
++
++  const renderers = getRenderers();
++  for (const renderer of renderers) {
++    renderer.attachNavigationManager();
++  }
++
++  addWebAssemblyNavigationEventListeners();
++  domListenersReady = true;
++}
++
++// B.W.S: See updates to IBlazor for detailed explanation.
++function ensureRazorComponentsDisposed() {
++  const renderers = getRenderers();
++  return Promise.all(renderers.map(renderer => renderer.componentsDisposed));
++}
++
++// B.W.S: See updates to IBlazor for detailed explanation.
++function ensureDomListenersRemoved() {
++  detachDebuggerHotKey();
++
++  const renderers = getRenderers();
++  for (const renderer of renderers) {
++    renderer.detachNavigationManager();
++  }
++
++  removeNavigationEventListeners(WebRendererId.WebAssembly);
++  domListenersReady = false;
++}
++
++// B.W.S: Blazor and the .NET browser platform will write to the global window references to a
++// number of runtime objects that are initialized as part of Blazor's startup sequence. Different
++// parts of Blazor, the .NET browser runtime, and some third-party libraries assume access to these
++// global references; however, without intervention, this prevents a page using single-spa from
++// having more than one Blazor micro-frontend registered because each one will simply clobber the
++// others' runtime references.
++//
++// To work around this, we store these references just before Blazor's boot function returns. Then,
++// each Blazor micro-frontend should call restoreGlobalState just before it adds its Blazor
++// application to the DOM. Finally, each micro-frontend should call clearGlobalState just before it
++// returns from its unmount lifecycle hook.
++//
++// Note that this doesn't necessarily mean that a page can have multiple Blazor micro-frontends
++// active simultaneously. Since each micro-frontend is effectively a separate, sandboxed instance of
++// Blazor and its associated .NET runtime, the fact that Blazor, the runtime, and third-party
++// libraries access global references written to the window object means that the last Blazor
++// micro-frontend to be mounted will be the one that has its global references restored. Any other
++// active Blazor micro-frontends will potentially call into the wrong instance of Blazor if one of
++// its components tries to access these global references.
++function restoreGlobalState() {
++  window['DotNet'] = DotNet;
++  window['Blazor'] = Blazor;
++  window['Module'] = Blazor.runtime.Module;
++  window['BINDING'] = Blazor.runtime.BINDING;
++  window['INTERNAL'] = Blazor.runtime.INTERNAL;
++}
++
++function clearGlobalState() {
++  delete window['DotNet'];
++  delete window['Blazor'];
++  delete window['Module'];
++  delete window['BINDING'];
++  delete window['INTERNAL'];
+ }
+ 
+ Blazor.start = boot;
++// B.W.S: Install additional APIs exposed by Blazor.WebAssembly.SingleSpa.
++Blazor.ensureDomListenersReady = ensureDomListenersReady;
++Blazor.ensureRazorComponentsDisposed = ensureRazorComponentsDisposed;
++Blazor.ensureDomListenersRemoved = ensureDomListenersRemoved;
++Blazor.restoreGlobalState = restoreGlobalState;
++Blazor.clearGlobalState = clearGlobalState;
+ window['DotNet'] = DotNet;
+ 
+ if (shouldAutoStart()) {

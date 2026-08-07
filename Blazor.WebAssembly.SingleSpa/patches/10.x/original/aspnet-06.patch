@@ -1,0 +1,117 @@
+diff --git a/src/Components/Web.JS/src/Platform/Mono/MonoDebugger.ts b/src/Components/Web.JS/src/Platform/Mono/MonoDebugger.ts
+index 1c67981933..7bc80b40f9 100644
+--- a/src/Components/Web.JS/src/Platform/Mono/MonoDebugger.ts
++++ b/src/Components/Web.JS/src/Platform/Mono/MonoDebugger.ts
+@@ -2,6 +2,8 @@
+ // The .NET Foundation licenses this file to you under the MIT license.
+ 
+ import { MonoConfig } from 'dotnet';
++// B.W.S: Import the function used for getting the configured WebAssembly options.
++import { getWebAssemblyOptions } from '../../Boot.WebAssembly.Common';
+ 
+ const navigatorUA = navigator as MonoNavigatorUserAgent;
+ const brands = navigatorUA.userAgentData && navigatorUA.userAgentData.brands;
+@@ -11,42 +13,80 @@ const currentBrowserIsChromeOrEdge = brands && brands.length > 0
+   : (window as any).chrome;
+ const platform = navigatorUA.userAgentData?.platform ?? navigator.platform;
+ 
++// B.W.S: Store a reference to the keydown event listener that starts the debugger so that it can be
++// removed later by detachDebuggerHotKey.
++let startDebuggerCallback: ((evt: KeyboardEvent) => void) | null = null;
++
+ function hasDebuggingEnabled(config: MonoConfig): boolean {
+   return config.debugLevel !== 0 && (currentBrowserIsChromeOrEdge || navigator.userAgent.includes('Firefox'));
+ }
+ 
+ export function attachDebuggerHotkey(config: MonoConfig): void {
+-  // Use the combination shift+alt+D because it isn't used by the major browsers
+-  // for anything else by default
+-  const altKeyName = platform.match(/^Mac/i) ? 'Cmd' : 'Alt';
+-  if (hasDebuggingEnabled(config)) {
+-    console.info(`Debugging hotkey: Shift+${altKeyName}+D (when application has focus)`);
++  // B.W.S: We only create and add a new listener if one isn't already present to avoid having to
++  // deal multiple listeners trying to start the debugger simultaneously.
++  if (!startDebuggerCallback) {
++    // Use the combination shift+alt+D because it isn't used by the major browsers
++    // for anything else by default
++    const altKeyName = platform.match(/^Mac/i) ? 'Cmd' : 'Alt';
++    if (hasDebuggingEnabled(config)) {
++      console.info(`Debugging hotkey: Shift+${altKeyName}+D (when application has focus)`);
++    }
++
++    // Even if debugging isn't enabled, we register the hotkey so we can report why it's not enabled
++    startDebuggerCallback = buildStartDebuggerCallback(config);
++    document.addEventListener('keydown', startDebuggerCallback);
++  }
++}
++
++// B.W.S: This is essentially the inverse of attachDebuggerHotKey. It is intended to be called from
++// ensureDomListenersRemoved.
++export function detachDebuggerHotKey() {
++  if (startDebuggerCallback) {
++    document.removeEventListener('keydown', startDebuggerCallback);
++    startDebuggerCallback = null;
+   }
++}
++
++// B.W.S: We need to be able to remove the key listener added by attachDebuggerHotKey. However, the
++// listener also depends on being able to access the MonoConfig and asset base URL. Thus, the actual
++// event listener is built as a separate function that closes over the config and asset base URL and
++// is returned to the caller.
++function buildStartDebuggerCallback(config: MonoConfig) {
++  // B.W.S: read the WebAssembly options so that we can get the asset base URL. If no asset base URL
++  // is available, use the page's base URL to preserve Blazor's original behavior as much as
++  // possible.
++  const webAssemblyOptions = getWebAssemblyOptions();
++  const assetBaseUrl = webAssemblyOptions.assetBaseUrl ?? new URL(document.baseURI);
+ 
+-  // Even if debugging isn't enabled, we register the hotkey so we can report why it's not enabled
+-  document.addEventListener('keydown', evt => {
++  return function startDebugger(evt: KeyboardEvent) {
+     if (evt.shiftKey && (evt.metaKey || evt.altKey) && evt.code === 'KeyD') {
+       if (!hasDebuggingEnabled(config)) {
+         console.error('Cannot start debugging, because the application was not compiled with debugging enabled.');
+       } else if (navigator.userAgent.includes('Firefox')) {
+-        launchFirefoxDebugger();
++        // B.W.S: Pass in the asset base URL so we can adjust the URL to the debug endpoint.
++        launchFirefoxDebugger(assetBaseUrl);
+       } else if (!currentBrowserIsChromeOrEdge) {
+         console.error('Currently, only Microsoft Edge (80+), Google Chrome, or Chromium, are supported for debugging.');
+       } else {
+-        launchDebugger();
++        // B.W.S: Pass in the asset base URL so we can adjust the URL to the debug endpoint.
++        launchDebugger(assetBaseUrl);
+       }
+     }
+-  });
++  };
+ }
+ 
+-async function launchFirefoxDebugger() {
+-  const response = await fetch(`_framework/debug?url=${encodeURIComponent(location.href)}&isFirefox=true`);
++// B.W.S: Pass in the asset base URL so we can adjust the URL to the debug endpoint.
++async function launchFirefoxDebugger(assetBaseUrl: URL) {
++  // B.W.S: Apply the asset base URL when building the URL to the debug endpoint.
++  const debugUrl = new URL(`_framework/debug?url=${encodeURIComponent(location.href)}&isFirefox=true`, assetBaseUrl);
++  const response = await fetch(debugUrl.toString());
+   if (response.status !== 200) {
+     console.warn(await response.text());
+   }
+ }
+ 
+-function launchDebugger() {
++// B.W.S: Pass in the asset base URL so we can adjust the URL to the debug endpoint.
++function launchDebugger(assetBaseUrl: URL) {
+   // The noopener flag is essential, because otherwise Chrome tracks the association with the
+   // parent tab, and then when the parent tab pauses in the debugger, the child tab does so
+   // too (even if it's since navigated to a different page). This means that the debugger
+@@ -55,7 +95,8 @@ function launchDebugger() {
+   // We have to construct a link element and simulate a click on it, because the more obvious
+   // window.open(..., 'noopener') always opens a new window instead of a new tab.
+   const link = document.createElement('a');
+-  link.href = `_framework/debug?url=${encodeURIComponent(location.href)}`;
++  // B.W.S: Apply the asset base URL when building the URL to the debug endpoint.
++  link.href = new URL(`_framework/debug?url=${encodeURIComponent(location.href)}`, assetBaseUrl).toString();
+   link.target = '_blank';
+   link.rel = 'noopener noreferrer';
+   link.click();

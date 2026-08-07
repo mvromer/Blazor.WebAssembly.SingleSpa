@@ -1,0 +1,113 @@
+diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts b/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts
+index f6d3824f32..6946d9d093 100644
+--- a/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts
++++ b/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts
+@@ -18,6 +18,10 @@ import { MonoConfig } from 'dotnet';
+ import { RootComponentManager } from './Services/RootComponentManager';
+ import { WebRendererId } from './Rendering/WebRendererId';
+ 
++// B.W.S: Import the function used to configure the navigation base URL used by the Blazor
++// Navigation Manager.
++import { setNavigationBaseUrl } from './Services/NavigationUtils';
++
+ let options: Partial<WebAssemblyStartOptions> | undefined;
+ let initializersPromise: Promise<void>;
+ let platformLoadPromise: Promise<void> | undefined;
+@@ -69,6 +73,14 @@ export function setWebAssemblyOptions(initializersReady: Promise<Partial<WebAsse
+   }
+ }
+ 
++// B.W.S: Add a getter for the WebAssembly options. There were a handful of places where obtaining
++// the options was necessary, and in some instances it was not possible to simply have the caller
++// pass them in. This will always ensure the returned value is a valid object, so there is no need
++// to do things like finalOptions = options ?? {}.
++export function getWebAssemblyOptions(): Partial<WebAssemblyStartOptions> {
++  return options ?? {};
++}
++
+ export function startWebAssembly(components: RootComponentManager<WebAssemblyComponentDescriptor>): Promise<void> {
+   if (startPromise !== undefined) {
+     throw new Error('Blazor WebAssembly has already started.');
+@@ -128,25 +140,9 @@ async function startCore(components: RootComponentManager<WebAssemblyComponentDe
+     }
+   };
+ 
+-  Blazor._internal.navigationManager.listenForNavigationEvents(WebRendererId.WebAssembly, async (uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
+-    await dispatcher.invokeDotNetStaticMethodAsync(
+-      'Microsoft.AspNetCore.Components.WebAssembly',
+-      'NotifyLocationChanged',
+-      uri,
+-      state,
+-      intercepted
+-    );
+-  }, async (callId: number, uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
+-    const shouldContinueNavigation = await dispatcher.invokeDotNetStaticMethodAsync<boolean>(
+-      'Microsoft.AspNetCore.Components.WebAssembly',
+-      'NotifyLocationChangingAsync',
+-      uri,
+-      state,
+-      intercepted
+-    );
+-
+-    Blazor._internal.navigationManager.endLocationChanging(callId, shouldContinueNavigation);
+-  });
++  // B.W.S: The original direct call to the navigation manager's listenForNavigationEvents function
++  // is now factored to the addNavigationEventListeners function that is called here.
++  addWebAssemblyNavigationEventListeners();
+ 
+   // Leverage the time while we are loading boot.config.json from the network to discover any potentially registered component on
+   // the document.
+@@ -207,7 +203,15 @@ export function waitForBootConfigLoaded(): Promise<MonoConfig> {
+ export function loadWebAssemblyPlatformIfNotStarted(): Promise<void> {
+   platformLoadPromise ??= (async () => {
+     await initializersPromise;
+-    const finalOptions = options ?? {};
++
++    // B.W.S: Configure the navigation base URL used by the Blazor Navigation Manager prior to
++    // starting the Blazor application.
++    //
++    // NOTE: We have to do it after initializersPromise resolves so that our options containing the
++    // navigation base URL are fully set.
++    const finalOptions = getWebAssemblyOptions();
++    setNavigationBaseUrl(finalOptions?.navigationBaseUrl ?? new URL(document.baseURI));
++
+     const existingConfig = options?.configureRuntime;
+     finalOptions.configureRuntime = (config) => {
+       existingConfig?.(config);
+@@ -229,6 +233,36 @@ export function hasLoadedWebAssemblyPlatform(): boolean {
+   return loadedWebAssemblyPlatform;
+ }
+ 
++// B.W.S: This adds the navigation event listeners used by the Blazor WebAssembly renderer. In the
++// original code, the call to listenForNavigationEvents was done directly in the startCore function,
++// but it was moved here to make it possible for this function to be called from the mount lifecycle
++// hook of a Blazor micro-frontend when single-spa remounts it to the page.
++export function addWebAssemblyNavigationEventListeners() {
++  Blazor._internal.navigationManager.listenForNavigationEvents(
++    WebRendererId.WebAssembly,
++    async (uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
++      await dispatcher.invokeDotNetStaticMethodAsync(
++        'Microsoft.AspNetCore.Components.WebAssembly',
++        'NotifyLocationChanged',
++        uri,
++        state,
++        intercepted
++      );
++    },
++    async (callId: number, uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
++      const shouldContinueNavigation = await dispatcher.invokeDotNetStaticMethodAsync<boolean>(
++        'Microsoft.AspNetCore.Components.WebAssembly',
++        'NotifyLocationChangingAsync',
++        uri,
++        state,
++        intercepted
++      );
++
++      Blazor._internal.navigationManager.endLocationChanging(callId, shouldContinueNavigation);
++    }
++  );
++}
++
+ // obsolete, legacy, don't use for new code!
+ function invokeJSFromDotNet(callInfo: Pointer, arg0: any, arg1: any, arg2: any): any {
+   const functionIdentifier = monoPlatform.readStringField(callInfo, 0)!;

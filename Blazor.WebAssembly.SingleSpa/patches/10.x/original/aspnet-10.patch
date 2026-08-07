@@ -1,0 +1,41 @@
+diff --git a/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts b/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts
+index 064b6e5ff3..b8c7521de4 100644
+--- a/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts
++++ b/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts
+@@ -121,6 +121,16 @@ export class EventDelegator {
+     this.eventInfoStore.addGlobalListener('click'); // Ensure we always listen for this
+   }
+ 
++  // B.W.S: The inverse of notifyAfterClick. This is called by detachFromEventDelegator, which is
++  // expected to occur when a Blazor micro-frontend is unmounted from the page by single-spa.
++  public removeAfterClickCallback(callback: (event: MouseEvent) => void): void {
++    this.eventInfoStore.removeGlobalListener('click');
++    const index = this.afterClickCallbacks.indexOf(callback);
++    if (index !== -1) {
++      this.afterClickCallbacks.splice(index, 1);
++    }
++  }
++
+   public setStopPropagation(element: Element, eventName: string, value: boolean): void {
+     const infoForElement = this.getEventHandlerInfosForElement(element, true)!;
+     infoForElement.stopPropagation(eventName, value);
+@@ -261,6 +271,19 @@ class EventInfoStore {
+     }
+   }
+ 
++  // B.W.S: The inverse of addGlobalListener. This is called by the EventDelegator when an
++  // after-click callback is removed from it. This is expected to occur when a Blazor micro-frontend
++  // is unmounted from the page by single-spa.
++  public removeGlobalListener(eventName: string) {
++    eventName = getBrowserEventName(eventName);
++
++    if (--this.countByEventName[eventName] === 0) {
++      delete this.countByEventName[eventName];
++      const useCapture = Object.prototype.hasOwnProperty.call(nonBubblingEvents, eventName);
++      document.removeEventListener(eventName, this.globalListener, useCapture);
++    }
++  }
++
+   public update(oldEventHandlerId: number, newEventHandlerId: number) {
+     if (Object.prototype.hasOwnProperty.call(this.infosByEventHandlerId, newEventHandlerId)) {
+       // Should never happen, but we want to know if it does

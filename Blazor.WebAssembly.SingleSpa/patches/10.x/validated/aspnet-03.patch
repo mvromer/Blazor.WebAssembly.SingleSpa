@@ -1,0 +1,43 @@
+diff --git a/src/Components/Web.JS/src/GlobalExports.ts b/src/Components/Web.JS/src/GlobalExports.ts
+index 46ec7fc747..0d162b5566 100644
+--- a/src/Components/Web.JS/src/GlobalExports.ts
++++ b/src/Components/Web.JS/src/GlobalExports.ts
+@@ -46,6 +46,38 @@ export interface IBlazor {
+   rootComponents: typeof RootComponentsFunctions;
+   runtime: RuntimeAPI,
+ 
++  // B.W.S: This is intended to be called when a Blazor micro-frontend is mounted on the page by
++  // single-spa. This is to ensure that any DOM listeners Blazor depends on for client-side
++  // navigation are added to the appropriate DOM elements before allowing the micro-frontend to
++  // complete its mount lifecycle event.
++  ensureDomListenersReady?: () => void;
++
++  // B.W.S: This is intended to be called and awaited when a Blazor micro-frontend is unmounted from
++  // the page by single-spa. This is to ensure that the Razor components have had a chance to
++  // dispose themselves before the micro-frontend completes its unmount lifecycle hook. This is
++  // important because we don't want single-spa to proceed with mounting any subsequent Blazor
++  // micro-frontends, which could potentially cause issues when the global Blazor state for that
++  // micro-frontend is set/restored. Otherwise, it's possible for the first micro-frontend to call
++  // into the second micron-frontend's .NET runtime during component disposal, which would be a
++  // runtime error.
++  ensureRazorComponentsDisposed?: () => Promise<unknown>;
++
++  // B.W.S: This is intended to be called when a Blazor micro-frontend is unmounted from the page by
++  // single-spa. This is to ensure that any DOM listeners that Blazor has added are removed so that
++  // they will not interfere with, e.g., client-side routing of any micro-frontends that are
++  // subsequently mounted on the page.
++  ensureDomListenersRemoved?: () => void;
++
++  // B.W.S: This is intended to be called when a Blazor micro-frontend is mounted on the page by
++  // single-spa. This is to ensure that any global runtime references that Blazor depends on is
++  // restored before the application is added to the page.
++  restoreGlobalState?: () => void;
++
++  // B.W.S: This is intended to be called when a Blazor micro-frontend is unmounted from the page by
++  // single-spa. This is to clear any global runtime references added by Blazor so that any
++  // subsequently mounted Blazor micro-frontend does not try to reference the wrong runtime.
++  clearGlobalState?: () => void;
++
+   _internal: {
+     navigationManager: typeof navigationManagerInternalFunctions | any;
+     domWrapper: typeof domFunctions;

@@ -1,0 +1,61 @@
+diff --git a/src/Components/Web.JS/src/Services/NavigationUtils.ts b/src/Components/Web.JS/src/Services/NavigationUtils.ts
+index 4ce44461ec..e0b3d2046d 100644
+--- a/src/Components/Web.JS/src/Services/NavigationUtils.ts
++++ b/src/Components/Web.JS/src/Services/NavigationUtils.ts
+@@ -7,6 +7,14 @@ let interactiveRouterRendererId: WebRendererId | undefined = undefined;
+ let programmaticEnhancedNavigationHandler: typeof performProgrammaticEnhancedNavigation | undefined;
+ let enhancedNavigationListener: typeof notifyEnhancedNavigationListeners | undefined;
+ 
++// B.W.S: We store the navigation base URL here and make it available for other components, notably
++// the Blazor navigation manager, to import and use it. To preserve as much as possible Blazor's
++// default behavior, we set the navigation base URL to the current page's base URL.
++export let navigationBaseUrl: URL = new URL(document.baseURI);
++export function setNavigationBaseUrl(baseUrl: URL) {
++  navigationBaseUrl = baseUrl;
++}
++
+ /**
+  * Checks if a click event corresponds to an <a> tag referencing a URL within the base href, and that interception
+  * isn't bypassed (e.g., by a 'download' attribute or the user holding a meta key while clicking).
+@@ -40,7 +48,10 @@ export function handleClickForNavigationInterception(event: MouseEvent, callback
+ }
+ 
+ export function isWithinBaseUriSpace(href: string) {
+-  const baseUriWithoutTrailingSlash = toBaseUriWithoutTrailingSlash(document.baseURI!);
++  // B.W.S: Compute the base URL using configured navigation base URL. Original code explicitly used
++  // the page's base URL, which is what the navigation base URL will default to as a way of
++  // preserving Blazor's original behavior as much as possible.
++  const baseUriWithoutTrailingSlash = toBaseUriWithoutTrailingSlash(navigationBaseUrl.toString());
+   const nextChar = href.charAt(baseUriWithoutTrailingSlash.length);
+ 
+   return href.startsWith(baseUriWithoutTrailingSlash)
+@@ -84,6 +95,12 @@ export function attachEnhancedNavigationListener(listener: typeof enhancedNaviga
+   enhancedNavigationListener = listener;
+ }
+ 
++// B.W.S: This is a new function that allows the Blazor navigation manager to detach the enhanced
++// navigation listener whenever the navigation manager unregisters its navigation event listeners.
++export function detachEnhancedNavigationListener() {
++  enhancedNavigationListener = undefined;
++}
++
+ export function notifyEnhancedNavigationListeners(internalDestinationHref: string, interceptedLink: boolean) {
+   enhancedNavigationListener?.(internalDestinationHref, interceptedLink);
+ }
+@@ -111,6 +128,14 @@ function toBaseUriWithoutTrailingSlash(baseUri: string) {
+ let testAnchor: HTMLAnchorElement;
+ export function toAbsoluteUri(relativeUri: string): string {
+   testAnchor = testAnchor || document.createElement('a');
+-  testAnchor.href = relativeUri;
++  // B.W.S: The original implementation simply set the test anchor's href attribute to the given
++  // relative URL. Doing so will cause the browser to resolve the anchor's href to the page's base
++  // URL. In the case of a Blazor micro-frontend, the page's base URL does not necessarily
++  // correspond with the navigation base URL used by the Blazor application's navigation manager.
++  // Since toAbsoluteUri is primarily used for building URLs that are then tested to determine if
++  // Blazor should perform an internal or external navigation, we always apply the navigation base
++  // URL when setting the test anchor's href. When the default navigation base URL is used, it will
++  // apply the page's base URL, which preserves as much as possible Blazor's original behavior.
++  testAnchor.href = new URL(relativeUri, navigationBaseUrl).toString();
+   return testAnchor.href;
+ }
+ 

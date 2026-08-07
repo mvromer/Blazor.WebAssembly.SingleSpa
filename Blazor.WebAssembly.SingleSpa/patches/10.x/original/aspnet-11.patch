@@ -1,0 +1,17 @@
+diff --git a/src/Components/Web.JS/src/Rendering/Renderer.ts b/src/Components/Web.JS/src/Rendering/Renderer.ts
+index 976e5a9c75..cdd7fc090f 100644
+--- a/src/Components/Web.JS/src/Rendering/Renderer.ts
++++ b/src/Components/Web.JS/src/Rendering/Renderer.ts
+@@ -47,6 +47,12 @@ export function attachRootComponentToElement(elementSelector: string, componentI
+   attachRootComponentToLogicalElement(browserRendererId, toLogicalElement(element, /* allow existing contents */ true), componentId, appendContent);
+ }
+ 
++// B.W.S: This is used by ensureDomListenersRemoved to detach the navigation manager from each
++// BrowserRenderer.
++export function getRenderers(): BrowserRenderer[] {
++  return Object.values(browserRenderers);
++}
++
+ export function getRendererer(browserRendererId: number): BrowserRenderer | undefined {
+   return browserRenderers[browserRendererId];
+ }
