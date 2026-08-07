@@ -28,7 +28,7 @@ index bd8e556096..1df8e4b4bc 100644
  
  async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
    if (started) {
-@@ -20,16 +31,107 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
+@@ -20,17 +31,106 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
    }
    started = true;
  
@@ -116,7 +116,6 @@ index bd8e556096..1df8e4b4bc 100644
 +  window['DotNet'] = DotNet;
 +  window['Blazor'] = Blazor;
 +  window['Module'] = Blazor.runtime.Module;
-+  window['BINDING'] = Blazor.runtime.BINDING;
 +  window['INTERNAL'] = Blazor.runtime.INTERNAL;
 +}
 +
@@ -124,7 +123,6 @@ index bd8e556096..1df8e4b4bc 100644
 +  delete window['DotNet'];
 +  delete window['Blazor'];
 +  delete window['Module'];
-+  delete window['BINDING'];
 +  delete window['INTERNAL'];
  }
  

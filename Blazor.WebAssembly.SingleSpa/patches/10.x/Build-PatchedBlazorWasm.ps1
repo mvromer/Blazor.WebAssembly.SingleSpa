@@ -25,8 +25,9 @@ function Assert-LastExitCode {
 }
 
 Write-Host -ForegroundColor Yellow "Applying ASP.NET Core patches"
-Push-Location $buildRootDir/src/validated/aspnetcore/10.x
+Push-Location $buildRootDir/src/aspnetcore/10.x
 git clean -xdff
+git restore .
 
 if (-not $SkipSingleSpaPatch) {
   git apply $patchDir/aspnetcore.patch
