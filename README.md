@@ -10,6 +10,11 @@ targeting single-spa. This integration comprises two packages:
   defining the lifecycle hooks single-spa expects each micro-frontend to provide for bootstrapping,
   mounting, and unmounting.
 
+Beginning with 0.10.0, these packages follows an `0.x.y` versioning scheme as follows:
+
+* `x` -- This is the major version of .NET supported
+* `y` -- This is the patch number for packages supporting that version of .NET
+
 ## Applicable Versions
 
 The Blazor.WebAssembly.SingleSpa NuGet package provides experimental support for projects targeting
