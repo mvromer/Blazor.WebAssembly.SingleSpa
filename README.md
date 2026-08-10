@@ -18,7 +18,7 @@ version of ASP.NET Core from which the assets were built.
 
 Target Framework Version | ASP.NET Core Version
 -------------------------|---------------------
-.NET 8                   | 8.0.15
+.NET 10                  | 10.0.10
 
 For a given target framework version, the Blazor.WebAssembly.SingleSpa package _may_ work for
 previous minor/patch releases. However, no guarantees are given.
@@ -197,14 +197,6 @@ Installing Node can vary based on things like your operating system and your pre
 On Windows, I prefer to use [nvm-windows](https://github.com/coreybutler/nvm-windows), and on Mac
 and Linux, I use [nvm](https://github.com/nvm-sh/nvm). Your mileage may vary. You just need to make
 sure it is at least Node.js 16.9 or greater (LTS versions preferred).
-
-#### Yarn 1
-
-After Node is installed, install Yarn 1 globally:
-
-```powershell
-npm install -g yarn
-```
 
 #### PowerShell
 
