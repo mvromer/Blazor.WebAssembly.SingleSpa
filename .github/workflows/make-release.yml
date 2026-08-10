@@ -13,6 +13,7 @@ jobs:
   build-and-release:
     permissions:
       id-token: write
+      contents: read
 
     runs-on: ubuntu-latest
     steps:
