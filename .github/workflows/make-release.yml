@@ -19,18 +19,16 @@ jobs:
         submodules: recursive
     - uses: actions/setup-node@v3
       with:
-        node-version: 16
+        node-version: 22
         registry-url: 'https://registry.npmjs.org'
     - uses: actions/setup-dotnet@v3
       with:
-        dotnet-version: 8
-    - name: Install Yarn 1
-      run: npm install -g yarn
+        dotnet-version: 10
 
     # Build and package Blazor.WebAssembly.SingleSpa NuGet package
-    - name: Patch ASP.NET Core 8.x
+    - name: Patch ASP.NET Core 10.x
       shell: pwsh
-      run: ./patches/8.x/Build-PatchedBlazorWasm.ps1
+      run: ./patches/10.x/Build-PatchedBlazorWasm.ps1
       working-directory: ./Blazor.WebAssembly.SingleSpa
     - name: Build and pack Blazor.WebAssembly.SingleSpa
       run: dotnet pack --configuration Release /p:Version=${{ inputs.version }} ./src/Blazor.WebAssembly.SingleSpa/Blazor.WebAssembly.SingleSpa.proj

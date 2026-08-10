@@ -1,0 +1,13 @@
+diff --git a/src/Components/Shared.JS/rollup.config.mjs b/src/Components/Shared.JS/rollup.config.mjs
+index b3e34e4fdb..1515b871c7 100644
+--- a/src/Components/Shared.JS/rollup.config.mjs
++++ b/src/Components/Shared.JS/rollup.config.mjs
+@@ -52,7 +52,7 @@ export default function createBaseConfig({ inputOutputMap, dir, updateConfig })
+           'Platform.isNode': 'false',
+           preventAssignment: true
+         }),
+-        terser({
++        false && terser({
+           compress: {
+             passes: 3
+           },

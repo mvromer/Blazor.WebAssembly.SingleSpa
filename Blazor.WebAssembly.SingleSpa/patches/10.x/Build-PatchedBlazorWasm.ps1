@@ -16,7 +16,7 @@ $nugetPackageBuildDir = Join-Path `
   "src" `
   "Blazor.WebAssembly.SingleSpa" `
   "build" `
-  "net8.0"
+  "net10.0"
 
 function Assert-LastExitCode {
   if ($LASTEXITCODE -ne 0) {
@@ -25,7 +25,8 @@ function Assert-LastExitCode {
 }
 
 Write-Host -ForegroundColor Yellow "Applying ASP.NET Core patches"
-Push-Location $buildRootDir/src/aspnetcore/8.x
+Push-Location $buildRootDir/src/aspnetcore/10.x
+git clean -xdff
 git restore .
 
 if (-not $SkipSingleSpaPatch) {
@@ -38,23 +39,14 @@ if ($DisableMinify) {
   Assert-LastExitCode
 }
 
-Write-Host -ForegroundColor Yellow "Building Microsoft.JSInterop.JS"
-Push-Location -Path src/JSInterop/Microsoft.JSInterop.JS/src
-npm run build
+Write-Host -ForegroundColor Yellow "Restoring dependencies"
+npm ci
 Assert-LastExitCode
-Pop-Location
 
-Write-Host -ForegroundColor Yellow "Building SignalR TypeScript clients"
-Push-Location -Path src/SignalR/clients/ts
+Write-Host -ForegroundColor Yellow "Building JavaScript projects"
 npm run build
 Assert-LastExitCode
-Pop-Location
 
-Write-Host -ForegroundColor Yellow "Building Web.JS"
-Push-Location -Path src/Components/Web.JS
-npm run build
-Assert-LastExitCode
-Copy-Item -Path dist/Release/blazor.webassembly.js -Destination $nugetPackageBuildDir
-Pop-Location
+Copy-Item -Path src/Components/Web.JS/dist/Release/blazor.webassembly.js -Destination $nugetPackageBuildDir
 
 Pop-Location

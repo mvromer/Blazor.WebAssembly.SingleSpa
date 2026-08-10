@@ -1,8 +1,8 @@
 diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts b/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts
-index f6d3824f32..6946d9d093 100644
+index 46311e7f1c..226c70b55c 100644
 --- a/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts
 +++ b/src/Components/Web.JS/src/Boot.WebAssembly.Common.ts
-@@ -18,6 +18,10 @@ import { MonoConfig } from 'dotnet';
+@@ -19,6 +19,10 @@ import { MonoConfig } from '@microsoft/dotnet-runtime';
  import { RootComponentManager } from './Services/RootComponentManager';
  import { WebRendererId } from './Rendering/WebRendererId';
  
@@ -11,8 +11,8 @@ index f6d3824f32..6946d9d093 100644
 +import { setNavigationBaseUrl } from './Services/NavigationUtils';
 +
  let options: Partial<WebAssemblyStartOptions> | undefined;
- let initializersPromise: Promise<void>;
  let platformLoadPromise: Promise<void> | undefined;
+ let loadedWebAssemblyPlatform = false;
 @@ -69,6 +73,14 @@ export function setWebAssemblyOptions(initializersReady: Promise<Partial<WebAsse
    }
  }
@@ -25,10 +25,10 @@ index f6d3824f32..6946d9d093 100644
 +  return options ?? {};
 +}
 +
- export function startWebAssembly(components: RootComponentManager<WebAssemblyComponentDescriptor>): Promise<void> {
+ export function startWebAssembly(components: RootComponentManager<WebAssemblyComponentDescriptor>, options: WebAssemblyServerOptions | undefined): Promise<void> {
    if (startPromise !== undefined) {
      throw new Error('Blazor WebAssembly has already started.');
-@@ -128,25 +140,9 @@ async function startCore(components: RootComponentManager<WebAssemblyComponentDe
+@@ -121,25 +133,9 @@ async function startCore(components: RootComponentManager<WebAssemblyComponentDe
      }
    };
  
@@ -57,8 +57,8 @@ index f6d3824f32..6946d9d093 100644
  
    // Leverage the time while we are loading boot.config.json from the network to discover any potentially registered component on
    // the document.
-@@ -207,7 +203,15 @@ export function waitForBootConfigLoaded(): Promise<MonoConfig> {
- export function loadWebAssemblyPlatformIfNotStarted(): Promise<void> {
+@@ -200,7 +196,15 @@ export function waitForBootConfigLoaded(): Promise<MonoConfig> {
+ export function loadWebAssemblyPlatformIfNotStarted(serverOptions: WebAssemblyServerOptions | undefined): Promise<void> {
    platformLoadPromise ??= (async () => {
      await initializersPromise;
 -    const finalOptions = options ?? {};
@@ -71,10 +71,10 @@ index f6d3824f32..6946d9d093 100644
 +    const finalOptions = getWebAssemblyOptions();
 +    setNavigationBaseUrl(finalOptions?.navigationBaseUrl ?? new URL(document.baseURI));
 +
-     const existingConfig = options?.configureRuntime;
-     finalOptions.configureRuntime = (config) => {
-       existingConfig?.(config);
-@@ -229,6 +233,36 @@ export function hasLoadedWebAssemblyPlatform(): boolean {
+     if (!finalOptions.environment) {
+       finalOptions.environment = serverOptions?.environmentName ?? undefined;
+     }
+@@ -228,6 +232,36 @@ export function hasLoadedWebAssemblyPlatform(): boolean {
    return loadedWebAssemblyPlatform;
  }
  
@@ -108,25 +108,26 @@ index f6d3824f32..6946d9d093 100644
 +  );
 +}
 +
- // obsolete, legacy, don't use for new code!
- function invokeJSFromDotNet(callInfo: Pointer, arg0: any, arg1: any, arg2: any): any {
-   const functionIdentifier = monoPlatform.readStringField(callInfo, 0)!;
+ export function updateWebAssemblyRootComponents(operations: string, webAssemblyState: string): void {
+   if (!startPromise) {
+     throw new Error('Blazor WebAssembly has not started.');
 diff --git a/src/Components/Web.JS/src/Boot.WebAssembly.ts b/src/Components/Web.JS/src/Boot.WebAssembly.ts
-index bd8e556096..1df8e4b4bc 100644
+index a1b106b924..33370c6525 100644
 --- a/src/Components/Web.JS/src/Boot.WebAssembly.ts
 +++ b/src/Components/Web.JS/src/Boot.WebAssembly.ts
-@@ -6,13 +6,24 @@ import { Blazor } from './GlobalExports';
- import { Module } from './Platform/Mono/MonoPlatform';
+@@ -5,14 +5,25 @@
+ import { Blazor } from './GlobalExports';
  import { shouldAutoStart } from './BootCommon';
  import { WebAssemblyStartOptions } from './Platform/WebAssemblyStartOptions';
 -import { setWebAssemblyOptions, startWebAssembly } from './Boot.WebAssembly.Common';
 +// B.W.S: Import function used for adding navigation event listeners specifically for the
 +// WebAssembly renderer.
 +import { addWebAssemblyNavigationEventListeners, setWebAssemblyOptions, startWebAssembly } from './Boot.WebAssembly.Common';
- import { WebAssemblyComponentDescriptor, discoverComponents } from './Services/ComponentDescriptorDiscovery';
+ import { WebAssemblyComponentDescriptor, discoverComponents, discoverWebAssemblyOptions } from './Services/ComponentDescriptorDiscovery';
  import { DotNet } from '@microsoft/dotnet-js-interop';
  import { InitialRootComponentsList } from './Services/InitialRootComponentsList';
  import { JSEventRegistry } from './Services/JSEventRegistry';
+ import { printErr } from './Platform/Mono/MonoPlatform';
 +// B.W.S: Need to import some functions used for ensuring listeners are ready, DOM is restored, etc.
 +import { attachDebuggerHotkey, detachDebuggerHotKey } from './Platform/Mono/MonoDebugger';
 +import { removeNavigationEventListeners } from './Services/NavigationManager';
@@ -141,7 +142,7 @@ index bd8e556096..1df8e4b4bc 100644
  
  async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
    if (started) {
-@@ -20,15 +31,106 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
+@@ -20,7 +31,16 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
    }
    started = true;
  
@@ -159,8 +160,10 @@ index bd8e556096..1df8e4b4bc 100644
  
    JSEventRegistry.create(Blazor);
    const webAssemblyComponents = discoverComponents(document, 'webassembly') as WebAssemblyComponentDescriptor[];
+@@ -28,9 +48,89 @@ async function boot(options?: Partial<WebAssemblyStartOptions>): Promise<void> {
+ 
    const components = new InitialRootComponentsList(webAssemblyComponents);
-   await startWebAssembly(components);
+   await startWebAssembly(components, webAssemblyOptions);
 +  // B.W.S: On boot, Blazor will ensure its DOM listeners (specifically those used for handling
 +  // navigation events) are ready to go. We keep track of the ready state here so that we don't
 +  // try to re-add any listeners in case the Blazor micro-frontend calls ensureDomListenersReady
@@ -227,7 +230,6 @@ index bd8e556096..1df8e4b4bc 100644
 +  window['DotNet'] = DotNet;
 +  window['Blazor'] = Blazor;
 +  window['Module'] = Blazor.runtime.Module;
-+  window['BINDING'] = Blazor.runtime.BINDING;
 +  window['INTERNAL'] = Blazor.runtime.INTERNAL;
 +}
 +
@@ -235,7 +237,6 @@ index bd8e556096..1df8e4b4bc 100644
 +  delete window['DotNet'];
 +  delete window['Blazor'];
 +  delete window['Module'];
-+  delete window['BINDING'];
 +  delete window['INTERNAL'];
  }
  
@@ -250,10 +251,10 @@ index bd8e556096..1df8e4b4bc 100644
  
  if (shouldAutoStart()) {
 diff --git a/src/Components/Web.JS/src/GlobalExports.ts b/src/Components/Web.JS/src/GlobalExports.ts
-index 46ec7fc747..0d162b5566 100644
+index 4e3bf21e6f..ade68002e4 100644
 --- a/src/Components/Web.JS/src/GlobalExports.ts
 +++ b/src/Components/Web.JS/src/GlobalExports.ts
-@@ -44,6 +44,38 @@ export interface IBlazor {
+@@ -46,6 +46,38 @@ export interface IBlazor {
    rootComponents: typeof RootComponentsFunctions;
    runtime: RuntimeAPI,
  
@@ -293,13 +294,13 @@ index 46ec7fc747..0d162b5566 100644
      navigationManager: typeof navigationManagerInternalFunctions | any;
      domWrapper: typeof domFunctions;
 diff --git a/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts b/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts
-index ff5bc46426..0e843fea65 100644
+index 5860073e2c..e134c20cb7 100644
 --- a/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts
 +++ b/src/Components/Web.JS/src/JSInitializers/JSInitializers.WebAssembly.ts
-@@ -21,7 +21,9 @@ export async function fetchAndInvokeInitializers(options: Partial<WebAssemblySta
-       WebRendererId.WebAssembly
-     );
-     const initializers = Object.keys((loadedConfig?.resources?.['libraryInitializers']) || {});
+@@ -36,7 +36,9 @@ export async function fetchAndInvokeInitializers(options: Partial<WebAssemblySta
+       })) as JSAsset[];
+     }
+ 
 -    await jsInitializer.importInitializersAsync(initializers, initializerArguments);
 +    // B.W.S: Pass down the asset base URL to the initializer so that it can resolve relative and
 +    // absolute URL paths to the initializer's module.
@@ -308,15 +309,15 @@ index ff5bc46426..0e843fea65 100644
    }
  }
 diff --git a/src/Components/Web.JS/src/JSInitializers/JSInitializers.ts b/src/Components/Web.JS/src/JSInitializers/JSInitializers.ts
-index 9b0089c2e7..37f63b25a3 100644
+index 174cff653b..6e8b8c7b16 100644
 --- a/src/Components/Web.JS/src/JSInitializers/JSInitializers.ts
 +++ b/src/Components/Web.JS/src/JSInitializers/JSInitializers.ts
-@@ -38,14 +38,29 @@ export class JSInitializer {
+@@ -43,15 +43,30 @@ export class JSInitializer {
      }
    }
  
--  async importInitializersAsync(initializerFiles: string[], initializerArguments: unknown[]): Promise<void> {
-+  async importInitializersAsync(initializerFiles: string[], initializerArguments: unknown[], assetBaseUrl?: URL): Promise<void> {
+-  async importInitializersAsync(initializerFiles: JSAsset[], initializerArguments: unknown[]): Promise<void> {
++  async importInitializersAsync(initializerFiles: JSAsset[], initializerArguments: unknown[], assetBaseUrl?: URL): Promise<void> {
      // This code is not called on WASM, because library intializers are imported by runtime.
  
 +    // B.W.S: Similar to all other assets loaded by a Blazor micro-frontend, the JavaScript
@@ -336,21 +337,22 @@ index 9b0089c2e7..37f63b25a3 100644
      await Promise.all(initializerFiles.map(f => importAndInvokeInitializer(this, f)));
  
      function adjustPath(path: string): string {
-       // This is the same we do in JS interop with the import callback
--      const base = document.baseURI;
+       // Use URL constructor to properly resolve relative paths, avoiding issues with query parameters
+       // This is the same mechanism as for import dotnet.js in MonoPlatform.ts
+-      return new URL(path, document.baseURI).toString();
 +      // B.W.S: Apply the base URL computed above to use when importing the initializer's module.
-+      const base = initializerBaseUrl;
-       path = base.endsWith('/') ? `${base}${path}` : `${base}/${path}`;
-       return path;
++      return new URL(path, initializerBaseUrl).toString();
      }
+ 
+     async function importAndInvokeInitializer(jsInitializer: JSInitializer, asset: JSAsset): Promise<void> {
 diff --git a/src/Components/Web.JS/src/Platform/Mono/MonoDebugger.ts b/src/Components/Web.JS/src/Platform/Mono/MonoDebugger.ts
-index 1c67981933..7bc80b40f9 100644
+index 0ae89acaa9..8ab0817c2a 100644
 --- a/src/Components/Web.JS/src/Platform/Mono/MonoDebugger.ts
 +++ b/src/Components/Web.JS/src/Platform/Mono/MonoDebugger.ts
 @@ -2,6 +2,8 @@
  // The .NET Foundation licenses this file to you under the MIT license.
  
- import { MonoConfig } from 'dotnet';
+ import { MonoConfig } from '@microsoft/dotnet-runtime';
 +// B.W.S: Import the function used for getting the configured WebAssembly options.
 +import { getWebAssemblyOptions } from '../../Boot.WebAssembly.Common';
  
@@ -461,33 +463,52 @@ index 1c67981933..7bc80b40f9 100644
    link.rel = 'noopener noreferrer';
    link.click();
 diff --git a/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts b/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
-index 6bf151259e..7268fe1859 100644
+index 1465e5f79c..922f26a931 100644
 --- a/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
 +++ b/src/Components/Web.JS/src/Platform/Mono/MonoPlatform.ts
-@@ -15,6 +15,8 @@ import { BINDINGType, MONOType } from 'dotnet/dotnet-legacy';
+@@ -13,6 +13,8 @@ import { Blazor } from '../../GlobalExports';
+ import { DotnetModuleConfig, MonoConfig, ModuleAPI, RuntimeAPI, GlobalizationMode } from '@microsoft/dotnet-runtime';
  import { fetchAndInvokeInitializers } from '../../JSInitializers/JSInitializers.WebAssembly';
  import { JSInitializer } from '../../JSInitializers/JSInitializers';
- import { WebRendererId } from '../../Rendering/WebRendererId';
 +// B.W.S: Import the function used for getting the configured WebAssembly options.
 +import { getWebAssemblyOptions } from '../../Boot.WebAssembly.Common';
  
  // initially undefined and only fully initialized after createEmscriptenModuleInstance()
- export let BINDING: BINDINGType = undefined as any;
-@@ -179,7 +181,12 @@ async function importDotnetJs(startOptions: Partial<WebAssemblyStartOptions>): P
-     }
+ export let dispatcher: DotNet.ICallDispatcher = undefined as any;
+@@ -117,12 +119,19 @@ async function importDotnetJs(startOptions: Partial<WebAssemblyStartOptions>): P
    }
  
--  const absoluteSrc = (new URL(src, document.baseURI)).toString();
+ 
 +  // B.W.S: For a Blazor micro-frontend, we would typically expect the URL to the dotnet.js be
 +  // provided by a custom boot resource loader. However, in case one was not provided, then we would
 +  // expect the script to be available from the asset base URL. We default to the page's base URL in
 +  // order to preserve Blazor's default behavior as much as possible.
 +  const baseUrl = startOptions.assetBaseUrl ?? new URL(document.baseURI);
-+  const absoluteSrc = (new URL(src, baseUrl)).toString();
-   return await import(/* webpackIgnore: true */ absoluteSrc);
++
+   // Allow overriding the URI from which the dotnet.*.js file is loaded
+   if (startOptions.loadBootResource) {
+     const resourceType: WebAssemblyBootResourceType = 'dotnetjs';
+     const customSrc = startOptions.loadBootResource(resourceType, 'dotnet.js', '_framework/dotnet.js', '', 'js-module-dotnet');
+     if (typeof (customSrc) === 'string') {
+-      const absoluteSrc = (new URL(customSrc, document.baseURI)).toString();
++      // B.W.S.: Adjust the source URL by our chosen base.
++      const absoluteSrc = (new URL(customSrc, baseUrl)).toString();
+       return await import(/* webpackIgnore: true */ absoluteSrc);
+     } else if (customSrc) {
+       // Since we must load this via a import, it's only valid to supply a URI (and not a Request, say)
+@@ -130,8 +139,10 @@ async function importDotnetJs(startOptions: Partial<WebAssemblyStartOptions>): P
+     }
+   }
+ 
++  // B.W.S.: Adjust the source URL by our chosen base.
++  const absoluteSrc = (new URL('dotnet.js', baseUrl)).toString();
+   // @ts-ignore: This dynamic import is handled at runtime and does not need a type declaration.
+-  return await import(/* webpackIgnore: true */ "./dotnet.js");
++  return await import(/* webpackIgnore: true */ absoluteSrc);
  }
  
-@@ -259,6 +266,10 @@ async function configureRuntimeInstance(): Promise<PlatformApi> {
+ function prepareRuntimeConfig(options: Partial<WebAssemblyStartOptions>, onConfigLoadedCallback?: (loadedConfig: MonoConfig) => void): DotnetModuleConfig {
+@@ -209,6 +220,10 @@ async function configureRuntimeInstance(): Promise<PlatformApi> {
  
    attachDebuggerHotkey(getConfig());
  
@@ -498,7 +519,7 @@ index 6bf151259e..7268fe1859 100644
    Blazor.runtime = runtime;
    Blazor._internal.dotNetCriticalError = printErr;
    setModuleImports('blazor-internal', {
-@@ -277,6 +288,41 @@ async function configureRuntimeInstance(): Promise<PlatformApi> {
+@@ -227,6 +242,41 @@ async function configureRuntimeInstance(): Promise<PlatformApi> {
    };
  }
  
@@ -529,7 +550,7 @@ index 6bf151259e..7268fe1859 100644
 +      return new URL(path, assetBaseUrl).toString();
 +    }
 +    return path;
-+  }
++  };
 +
 +  internalRuntime.dynamic_import = (moduleName: string, moduleUrl: string): Promise<any> => {
 +    moduleUrl = adjustUrlPath(moduleUrl);
@@ -541,7 +562,7 @@ index 6bf151259e..7268fe1859 100644
    const percentage = resourcesLoaded / totalResources * 100;
    document.documentElement.style.setProperty('--blazor-load-percentage', `${percentage}%`);
 diff --git a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts b/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
-index 1a0af87a0e..f472b37731 100644
+index bb01684cf5..f7af476e2d 100644
 --- a/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
 +++ b/src/Components/Web.JS/src/Platform/WebAssemblyStartOptions.ts
 @@ -30,6 +30,58 @@ export interface WebAssemblyStartOptions {
@@ -604,12 +625,12 @@ index 1a0af87a0e..f472b37731 100644
     * Allows to override .NET runtime configuration.
     */
 diff --git a/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts b/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
-index 7496dd5522..30c0455266 100644
+index 6cd526a49e..1b4a06d236 100644
 --- a/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
 +++ b/src/Components/Web.JS/src/Rendering/BrowserRenderer.ts
 @@ -5,7 +5,8 @@ import { RenderBatch, ArrayBuilderSegment, RenderTreeEdit, RenderTreeFrame, Edit
  import { EventDelegator } from './Events/EventDelegator';
- import { LogicalElement, PermutationListEntry, toLogicalElement, insertLogicalChild, removeLogicalChild, getLogicalParent, getLogicalChild, createAndInsertLogicalContainer, isSvgElement, permuteLogicalChildren, getClosestDomElement, emptyLogicalElement, getLogicalChildrenArray } from './LogicalElements';
+ import { LogicalElement, PermutationListEntry, toLogicalElement, insertLogicalChild, removeLogicalChild, getLogicalParent, getLogicalChild, createAndInsertLogicalContainer, isSvgElement, permuteLogicalChildren, getClosestDomElement, emptyLogicalElement, getLogicalChildrenArray, depthFirstNodeTreeTraversal } from './LogicalElements';
  import { applyCaptureIdToElement } from './ElementReferenceCapture';
 -import { attachToEventDelegator as attachNavigationManagerToEventDelegator } from '../Services/NavigationManager';
 +// B.W.S: Import functions needed for detaching the navigation manager from the event delegator.
@@ -617,7 +638,7 @@ index 7496dd5522..30c0455266 100644
  import { applyAnyDeferredValue, tryApplySpecialProperty } from './DomSpecialPropertyUtil';
  const sharedTemplateElemForParsing = document.createElement('template');
  const sharedSvgElemForParsing = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-@@ -23,15 +24,65 @@ export class BrowserRenderer {
+@@ -23,15 +24,66 @@ export class BrowserRenderer {
  
    private childComponentLocations: { [componentId: number]: LogicalElement } = {};
  
@@ -643,6 +664,7 @@ index 7496dd5522..30c0455266 100644
 +  // it seems like in the context of a Blazor micro-frontend, this would be very peculiar behavior
 +  // and likely indicate a logic bug. Thus, we don't currently try to cover this specific case.
 +  private componentsDisposedPromise = Promise.resolve();
++
 +  private resolveComponentsDisposedPromise: (() => void) | null = null;
 +
    public constructor(browserRendererId: number) {
@@ -683,7 +705,7 @@ index 7496dd5522..30c0455266 100644
    public getRootComponentCount(): number {
      return this.rootComponentIds.size;
    }
-@@ -48,6 +99,34 @@ export class BrowserRenderer {
+@@ -48,6 +100,34 @@ export class BrowserRenderer {
        element = createAndInsertLogicalContainer(element, indexAfterLastChild);
      }
  
@@ -718,7 +740,7 @@ index 7496dd5522..30c0455266 100644
      markAsInteractiveRootComponentElement(element, true);
      this.attachComponentToElement(componentId, element);
      this.rootComponentIds.add(componentId);
-@@ -99,6 +178,18 @@ export class BrowserRenderer {
+@@ -100,6 +180,18 @@ export class BrowserRenderer {
      }
  
      delete this.childComponentLocations[componentId];
@@ -738,10 +760,10 @@ index 7496dd5522..30c0455266 100644
  
    public disposeEventHandler(eventHandlerId: number): void {
 diff --git a/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts b/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts
-index 064b6e5ff3..b8c7521de4 100644
+index b0fd5e7fe7..d5abf4308e 100644
 --- a/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts
 +++ b/src/Components/Web.JS/src/Rendering/Events/EventDelegator.ts
-@@ -121,6 +121,16 @@ export class EventDelegator {
+@@ -134,6 +134,16 @@ export class EventDelegator {
      this.eventInfoStore.addGlobalListener('click'); // Ensure we always listen for this
    }
  
@@ -757,9 +779,9 @@ index 064b6e5ff3..b8c7521de4 100644
 +
    public setStopPropagation(element: Element, eventName: string, value: boolean): void {
      const infoForElement = this.getEventHandlerInfosForElement(element, true)!;
-     infoForElement.stopPropagation(eventName, value);
-@@ -261,6 +271,19 @@ class EventInfoStore {
-     }
+     const currentValue = infoForElement.stopPropagation(eventName);
+@@ -316,6 +326,19 @@ class EventInfoStore {
+     document.addEventListener(eventName, this.globalListener, { capture: useCapture, passive: false });
    }
  
 +  // B.W.S: The inverse of addGlobalListener. This is called by the EventDelegator when an
@@ -779,7 +801,7 @@ index 064b6e5ff3..b8c7521de4 100644
      if (Object.prototype.hasOwnProperty.call(this.infosByEventHandlerId, newEventHandlerId)) {
        // Should never happen, but we want to know if it does
 diff --git a/src/Components/Web.JS/src/Rendering/Renderer.ts b/src/Components/Web.JS/src/Rendering/Renderer.ts
-index 976e5a9c75..cdd7fc090f 100644
+index a5619de927..c7c8cca8b7 100644
 --- a/src/Components/Web.JS/src/Rendering/Renderer.ts
 +++ b/src/Components/Web.JS/src/Rendering/Renderer.ts
 @@ -47,6 +47,12 @@ export function attachRootComponentToElement(elementSelector: string, componentI
@@ -796,18 +818,17 @@ index 976e5a9c75..cdd7fc090f 100644
    return browserRenderers[browserRendererId];
  }
 diff --git a/src/Components/Web.JS/src/Services/NavigationManager.ts b/src/Components/Web.JS/src/Services/NavigationManager.ts
-index a31c2ff82f..d2903ada59 100644
+index 8e2de80950..498fa55854 100644
 --- a/src/Components/Web.JS/src/Services/NavigationManager.ts
 +++ b/src/Components/Web.JS/src/Services/NavigationManager.ts
-@@ -4,11 +4,15 @@
+@@ -4,10 +4,14 @@
  import '@microsoft/dotnet-js-interop';
  import { resetScrollAfterNextBatch } from '../Rendering/Renderer';
  import { EventDelegator } from '../Rendering/Events/EventDelegator';
--import { attachEnhancedNavigationListener, getInteractiveRouterRendererId, handleClickForNavigationInterception, hasInteractiveRouter, hasProgrammaticEnhancedNavigationHandler, isSamePageWithHash, isWithinBaseUriSpace, performProgrammaticEnhancedNavigation, performScrollToElementOnTheSamePage, scrollToElement, setHasInteractiveRouter, toAbsoluteUri } from './NavigationUtils';
-+import { attachEnhancedNavigationListener, detachEnhancedNavigationListener, getInteractiveRouterRendererId, handleClickForNavigationInterception, hasInteractiveRouter, hasProgrammaticEnhancedNavigationHandler, isSamePageWithHash, isWithinBaseUriSpace, performProgrammaticEnhancedNavigation, performScrollToElementOnTheSamePage, scrollToElement, setHasInteractiveRouter, toAbsoluteUri } from './NavigationUtils';
+-import { attachEnhancedNavigationListener, getInteractiveRouterRendererId, handleClickForNavigationInterception, hasInteractiveRouter, hasProgrammaticEnhancedNavigationHandler, isForSamePath, isSamePageWithHash, isWithinBaseUriSpace, performProgrammaticEnhancedNavigation, performScrollToElementOnTheSamePage, scrollToElement, setHasInteractiveRouter, toAbsoluteUri } from './NavigationUtils';
++import { attachEnhancedNavigationListener, detachEnhancedNavigationListener, getInteractiveRouterRendererId, handleClickForNavigationInterception, hasInteractiveRouter, hasProgrammaticEnhancedNavigationHandler, isForSamePath, isSamePageWithHash, isWithinBaseUriSpace, performProgrammaticEnhancedNavigation, performScrollToElementOnTheSamePage, scrollToElement, setHasInteractiveRouter, toAbsoluteUri } from './NavigationUtils';
  import { WebRendererId } from '../Rendering/WebRendererId';
  import { isRendererAttached } from '../Rendering/WebRendererInteropMethods';
- import { IBlazor } from '../GlobalExports';
  
 +// B.W.S: Import the navigation base URL so that it can be returned by the navigation manager's
 +// internal API.
@@ -816,7 +837,7 @@ index a31c2ff82f..d2903ada59 100644
  let hasRegisteredNavigationEventListeners = false;
  let currentHistoryIndex = 0;
  let currentLocationChangingCallId = 0;
-@@ -33,7 +37,8 @@ export const internalFunctions = {
+@@ -32,7 +36,8 @@ export const internalFunctions = {
    endLocationChanging,
    navigateTo: navigateToFromDotNet,
    refresh,
@@ -826,7 +847,7 @@ index a31c2ff82f..d2903ada59 100644
    getLocationHref: (): string => location.href,
    scrollToElement,
  };
-@@ -63,6 +68,28 @@ function listenForNavigationEvents(
+@@ -62,6 +67,28 @@ function listenForNavigationEvents(
    });
  }
  
@@ -855,7 +876,7 @@ index a31c2ff82f..d2903ada59 100644
  function setHasLocationChangingListeners(rendererId: WebRendererId, hasListeners: boolean) {
    const callbacks = navigationCallbacks.get(rendererId);
    if (!callbacks) {
-@@ -76,17 +103,34 @@ export function attachToEventDelegator(eventDelegator: EventDelegator): void {
+@@ -75,17 +102,34 @@ export function attachToEventDelegator(eventDelegator: EventDelegator): void {
    // We need to respond to clicks on <a> elements *after* the EventDelegator has finished
    // running its simulated bubbling process so that we can respect any preventDefault requests.
    // So instead of registering our own native event, register using the EventDelegator.
@@ -898,7 +919,7 @@ index a31c2ff82f..d2903ada59 100644
  
  function refresh(forceReload: boolean): void {
    if (!forceReload && hasProgrammaticEnhancedNavigationHandler()) {
-@@ -235,7 +279,21 @@ async function onBrowserInitiatedPopState(state: PopStateEvent) {
+@@ -233,7 +277,21 @@ async function onBrowserInitiatedPopState(state: PopStateEvent) {
    ignorePendingNavigation();
  
    const callbacks = getInteractiveRouterNavigationCallbacks();
@@ -922,12 +943,12 @@ index a31c2ff82f..d2903ada59 100644
      const userState = state.state?.userState;
      const delta = index - currentHistoryIndex;
 diff --git a/src/Components/Web.JS/src/Services/NavigationUtils.ts b/src/Components/Web.JS/src/Services/NavigationUtils.ts
-index 4ce44461ec..e0b3d2046d 100644
+index 9976eafc89..9e18501a09 100644
 --- a/src/Components/Web.JS/src/Services/NavigationUtils.ts
 +++ b/src/Components/Web.JS/src/Services/NavigationUtils.ts
 @@ -7,6 +7,14 @@ let interactiveRouterRendererId: WebRendererId | undefined = undefined;
  let programmaticEnhancedNavigationHandler: typeof performProgrammaticEnhancedNavigation | undefined;
- let enhancedNavigationListener: typeof notifyEnhancedNavigationListners | undefined;
+ let enhancedNavigationListener: typeof notifyEnhancedNavigationListeners | undefined;
  
 +// B.W.S: We store the navigation base URL here and make it available for other components, notably
 +// the Blazor navigation manager, to import and use it. To preserve as much as possible Blazor's
@@ -952,7 +973,7 @@ index 4ce44461ec..e0b3d2046d 100644
    const nextChar = href.charAt(baseUriWithoutTrailingSlash.length);
  
    return href.startsWith(baseUriWithoutTrailingSlash)
-@@ -70,6 +81,12 @@ export function attachEnhancedNavigationListener(listener: typeof enhancedNaviga
+@@ -84,6 +95,12 @@ export function attachEnhancedNavigationListener(listener: typeof enhancedNaviga
    enhancedNavigationListener = listener;
  }
  
@@ -962,10 +983,10 @@ index 4ce44461ec..e0b3d2046d 100644
 +  enhancedNavigationListener = undefined;
 +}
 +
- export function notifyEnhancedNavigationListners(internalDestinationHref: string, interceptedLink: boolean) {
+ export function notifyEnhancedNavigationListeners(internalDestinationHref: string, interceptedLink: boolean) {
    enhancedNavigationListener?.(internalDestinationHref, interceptedLink);
  }
-@@ -97,7 +114,15 @@ function toBaseUriWithoutTrailingSlash(baseUri: string) {
+@@ -111,7 +128,15 @@ function toBaseUriWithoutTrailingSlash(baseUri: string) {
  let testAnchor: HTMLAnchorElement;
  export function toAbsoluteUri(relativeUri: string): string {
    testAnchor = testAnchor || document.createElement('a');
@@ -983,15 +1004,15 @@ index 4ce44461ec..e0b3d2046d 100644
  }
  
 diff --git a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
-index 4a237e391c..402ec3b9f6 100644
+index 8c0a3d9c69..30231973c9 100644
 --- a/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
 +++ b/src/JSInterop/Microsoft.JSInterop.JS/src/src/Microsoft.JSInterop.ts
-@@ -71,8 +71,38 @@ export module DotNet {
+@@ -81,8 +81,38 @@ export module DotNet {
        // In most cases developers will want to resolve dynamic imports relative to the base HREF.
        // However since we're the one calling the import keyword, they would be resolved relative to
        // this framework bundle URL. Fix this by providing an absolute URL.
 -      if (typeof url === "string" && url.startsWith("./")) {
--          url = new URL(url.substr(2), document.baseURI).toString();
+-          url = new URL(url.substring(2), document.baseURI).toString();
 +      if (typeof url === "string") {
 +          if (url.startsWith("./")) {
 +              // B.W.S: The given URL is a relative URL path. Blazor's intent in this case is to
@@ -1027,7 +1048,7 @@ index 4a237e391c..402ec3b9f6 100644
        }
  
        return import(/* webpackIgnore: true */ url);
-@@ -686,4 +716,16 @@ export module DotNet {
+@@ -820,4 +850,16 @@ export module DotNet {
  
        return value;
    }

@@ -10,6 +10,11 @@ targeting single-spa. This integration comprises two packages:
   defining the lifecycle hooks single-spa expects each micro-frontend to provide for bootstrapping,
   mounting, and unmounting.
 
+Beginning with 0.10.0, these packages follows an `0.x.y` versioning scheme as follows:
+
+* `x` -- This is the major version of .NET supported
+* `y` -- This is the patch number for packages supporting that version of .NET
+
 ## Applicable Versions
 
 The Blazor.WebAssembly.SingleSpa NuGet package provides experimental support for projects targeting
@@ -18,7 +23,7 @@ version of ASP.NET Core from which the assets were built.
 
 Target Framework Version | ASP.NET Core Version
 -------------------------|---------------------
-.NET 8                   | 8.0.15
+.NET 10                  | 10.0.10
 
 For a given target framework version, the Blazor.WebAssembly.SingleSpa package _may_ work for
 previous minor/patch releases. However, no guarantees are given.
@@ -68,7 +73,7 @@ export const { bootstrap, mount, unmount } = singleSpaBlazor({
   // web application will be fetched. This is typically the URL that is hosting your
   // Blazor WASM micro-frontend. The URL must end in a trailing slash.
   //
-  // NOTE: In .NET 8, some of the resource fetching code that previously lived in
+  // NOTE: In .NET 8+, some of the resource fetching code that previously lived in
   // the Blazor WASM startup script now lives in the .NET browser runtime. This
   // makes it hard to ensure the correct credential option is set for fetch calls
   // made by the runtime. In some cases it will set the fetch credentials option
@@ -170,8 +175,8 @@ The following assumes you are working from the `Blazor.WebAssembly.SingleSpa` di
 This repository is structured around the following idea: for a given major version `N` of ASP.NET
 Core, a submodule named `aspnetcore/N.x` is located at `src/aspnetcore/N.x`. Each submodule is
 configured to pull a version tag from the `dotnet/aspnetcore` repository matching the specified
-major version number, e.g., `src/aspnetcore/8.x` pulls the commit of `dotnet/aspnetcore` tagged with
-`v8.0.1`.
+major version number, e.g., `src/aspnetcore/8.x` pulls the commit of `dotnet/aspnetcore` tagged
+with, e.g., `v8.0.1`.
 
 Within this project's `patches` directory are a corresponding set of patches and scripts, one for
 each major version of ASP.NET Core that has been tested. The `Build-PatchedBlazorWasm.ps1` script in
@@ -185,9 +190,9 @@ the correct package location.
 
 ### Installing prerequisites
 
-Building this package requires .NET SDK 8+, Node.js 16.9+, Yarn 1, and PowerShell 7+.
+Building this package requires .NET SDK 10+, Node.js 22+, and PowerShell 7+.
 
-#### .NET SDK 8+
+#### .NET SDK 10+
 
 Download from [here](https://dotnet.microsoft.com/en-us/download).
 
@@ -196,15 +201,7 @@ Download from [here](https://dotnet.microsoft.com/en-us/download).
 Installing Node can vary based on things like your operating system and your preferred workflow.
 On Windows, I prefer to use [nvm-windows](https://github.com/coreybutler/nvm-windows), and on Mac
 and Linux, I use [nvm](https://github.com/nvm-sh/nvm). Your mileage may vary. You just need to make
-sure it is at least Node.js 16.9 or greater (LTS versions preferred).
-
-#### Yarn 1
-
-After Node is installed, install Yarn 1 globally:
-
-```powershell
-npm install -g yarn
-```
+sure it is at least Node.js 22 or greater (LTS versions preferred).
 
 #### PowerShell
 
